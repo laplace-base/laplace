@@ -7,6 +7,7 @@ additional_profiles = ["debug"]
 APP_NAME = "laplace"
 TARGET_DIR = "target"
 BACK_OUTPUT_DIR = "lapps/back"
+FRONT_OUTPUT_DIR = "lapps/front"
 # NOTE: `web_sys_unstable_apis` cfg enables the Web Animations bindings in web-sys used by `wingy-hypertext-web`.
 RUSTFLAGS = "--cfg=web_sys_unstable_apis"
 
@@ -28,12 +29,9 @@ PROFILE_BUILD_DIR = "${PROFILE}"
     PROFILE = "dev"
     PROFILE_BUILD_DIR = "debug"
 
-    ## -----------
-    ## MARK: Front
-    ## -----------
-
-[tasks.set-front-output-dir.env]
-FRONT_OUTPUT_DIR = { source = "${APP_NAME}", default_value = "lapps/front/${APP_NAME}", mapping = { "laplace" = "lapps/front" } }
+## -----------
+## MARK: Front
+## -----------
 
 [tasks.build-front]
 command = "cargo"
@@ -44,25 +42,26 @@ dependencies = ["choose-profile-web"]
 [tasks.clean-static]
 script_runner = "@duckscript"
 script = '''
-entries = glob_array ${FRONT_OUTPUT_DIR}/*
+entries = glob_array ${FRONT_OUTPUT_DIR}/${APP_NAME}/*
 for entry in ${entries}
-    if not equals ${entry} ${FRONT_OUTPUT_DIR}/dist
+    if not equals ${entry} ${FRONT_OUTPUT_DIR}/${APP_NAME}/dist
         rm -r ${entry}
     end
 end
 '''
-dependencies = ["set-front-output-dir"]
 
 [tasks.copy-static]
 script_runner = "@duckscript"
 script = '''
 if eq ${APP_NAME} "laplace"
-    glob_cp crates/front/webassets/**/* ${FRONT_OUTPUT_DIR}/
+    glob_cp crates/front/webassets/**/* ${FRONT_OUTPUT_DIR}/${APP_NAME}/
+elseif eq ${APP_NAME} "vendor"
+    glob_cp webassets/vendor/**/* ${FRONT_OUTPUT_DIR}/${APP_NAME}/
 else
-    glob_cp examples/${APP_NAME}/front/webassets/**/* ${FRONT_OUTPUT_DIR}/
+    glob_cp examples/${APP_NAME}/front/webassets/**/* ${FRONT_OUTPUT_DIR}/${APP_NAME}/
 end
 '''
-dependencies = ["set-front-output-dir", "clean-static"]
+dependencies = ["clean-static"]
 
 [tasks.bindgen-front]
 command = "wasm-bindgen"
@@ -93,15 +92,14 @@ args = [
 [tasks.clean-dist]
 script_runner = "@duckscript"
 script = '''
-rm -r ${FRONT_OUTPUT_DIR}/dist
+rm -r ${FRONT_OUTPUT_DIR}/${APP_NAME}/dist
 '''
-dependencies = ["set-front-output-dir"]
 
 [tasks.deploy-front]
 script_runner = "@duckscript"
 script = '''
-glob_cp ${TARGET_DIR}/dist/${APP_NAME}-front_bg.wasm ${FRONT_OUTPUT_DIR}/dist/
-glob_cp ${TARGET_DIR}/dist/${APP_NAME}-front.js ${FRONT_OUTPUT_DIR}/dist/
+glob_cp ${TARGET_DIR}/dist/${APP_NAME}-front_bg.wasm ${FRONT_OUTPUT_DIR}/${APP_NAME}/dist/
+glob_cp ${TARGET_DIR}/dist/${APP_NAME}-front.js ${FRONT_OUTPUT_DIR}/${APP_NAME}/dist/
 '''
 dependencies = ["clean-dist"]
 
@@ -112,7 +110,7 @@ condition = { files_modified = { input = [
     "${TARGET_DIR}/dist/${APP_NAME}-front_bg.wasm",
 ] } }
 run_task = { name = ["bindgen-front", "optimize-front"] }
-dependencies = ["set-front-output-dir", "build-front"]
+dependencies = ["build-front"]
 
 [tasks.front]
 dependencies = ["bundle-front", "copy-static", "deploy-front"]
@@ -157,9 +155,14 @@ run_task = [
 ]
 dependencies = ["choose-profile"]
 
+[tasks.vendor]
+env = { "APP_NAME" = "vendor" }
+run_task = "copy-static"
+
 [tasks.laplace]
-run_task = "app"
-dependencies = ["front"]
+env = { "APP_NAME" = "laplace" }
+run_task = { name = ["front", "app"] }
+dependencies = ["vendor"]
 
 [tasks.echo]
 env = { "APP_NAME" = "echo" }

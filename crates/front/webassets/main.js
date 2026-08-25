@@ -1,4 +1,4 @@
-import init, * as wasm from "/dist/laplace-front.js";
+import init, * as wasm from "./dist/laplace-front.js";
 import define_client_router_ext from '/vendor/htmx/client-router.ext.js';
 
 await init();

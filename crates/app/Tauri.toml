@@ -25,5 +25,6 @@ with-global-tauri = true
 
 [[app.windows]]
 title = "Laplace"
+url = "laplace/index.html"
 width = 1200
 height = 800

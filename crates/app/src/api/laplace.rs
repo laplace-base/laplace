@@ -12,16 +12,16 @@ pub fn get_lang(state: tauri::State<State>) -> String {
 
 #[tauri::command]
 pub fn open_lapp(handle: AppHandle, name: &str) {
-    log::info!("Open lapp: {name}");
+    log::debug!("Open lapp: {name}");
 
     let _wapp_window = WebviewWindowBuilder::new(&handle, name, WebviewUrl::App(Path::new(name).join("index.html")))
         .on_download(|_view, event| {
             match event {
                 DownloadEvent::Requested { url, destination } => {
-                    log::info!("Download: Requested {url:?}, {destination:?}")
+                    log::debug!("Download: Requested {url:?}, {destination:?}")
                 },
                 DownloadEvent::Finished { url, path, success: _ } => {
-                    log::info!("Download: Finished {url:?}, {path:?}")
+                    log::debug!("Download: Finished {url:?}, {path:?}")
                 },
                 _ => todo!(),
             }
@@ -29,18 +29,18 @@ pub fn open_lapp(handle: AppHandle, name: &str) {
         })
         .on_page_load(|_window, payload| match payload.event() {
             PageLoadEvent::Started => {
-                log::info!("{} starting loading", payload.url());
+                log::debug!("{} starting loading", payload.url());
             },
             PageLoadEvent::Finished => {
-                log::info!("{} finished loading", payload.url());
+                log::debug!("{} finished loading", payload.url());
             },
         })
         .on_navigation(|url| {
-            log::info!("Navigation: {url}");
+            log::debug!("Navigation: {url}");
             true
         })
         .on_web_resource_request(|request, _response| {
-            log::info!("Request: {}", request.uri());
+            log::debug!("Request: {}", request.uri());
         })
         .build()
         .expect("Failed to open lapp");
