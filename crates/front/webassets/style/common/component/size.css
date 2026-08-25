@@ -1,0 +1,39 @@
+.size-extra-small {
+  font-size: var(--wa-font-size-xs) !important;
+}
+
+.wa-size-xs {
+  font-size: var(--wa-font-size-xs);
+}
+
+.size-small {
+  font-size: var(--wa-font-size-s) !important;
+}
+
+.wa-size-s {
+  font-size: var(--wa-font-size-s);
+}
+
+.size-medium {
+  font-size: var(--wa-font-size-m) !important;
+}
+
+.wa-size-m {
+  font-size: var(--wa-font-size-m);
+}
+
+.size-large {
+  font-size: var(--wa-font-size-l) !important;
+}
+
+.wa-size-l {
+  font-size: var(--wa-font-size-l);
+}
+
+.size-extra-large {
+  font-size: var(--wa-font-size-xl) !important;
+}
+
+.wa-size-xl {
+  font-size: var(--wa-font-size-xl);
+}

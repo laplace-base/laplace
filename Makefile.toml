@@ -1,0 +1,226 @@
+[config]
+default_to_workspace = false
+additional_profiles = ["debug"]
+
+
+[env]
+APP_NAME = "laplace"
+TARGET_DIR = "target"
+BACK_OUTPUT_DIR = "lapps/back"
+# NOTE: `web_sys_unstable_apis` cfg enables the Web Animations bindings in web-sys used by `wingy-hypertext-web`.
+RUSTFLAGS = "--cfg=web_sys_unstable_apis"
+
+[tasks.choose-profile.env]
+PROFILE = "release"
+PROFILE_BUILD_DIR = "${PROFILE}"
+
+    [tasks.choose-profile.env.debug]
+    PROFILE = "dev"
+    PROFILE_BUILD_DIR = "debug"
+
+[tasks.choose-profile-web.env]
+RUSTFLAGS = "-Copt-level=z --cfg=web_sys_unstable_apis"
+PROFILE = "wasm-release"
+PROFILE_BUILD_DIR = "${PROFILE}"
+
+    [tasks.choose-profile-web.env.debug]
+    RUSTFLAGS = "--cfg=web_sys_unstable_apis"
+    PROFILE = "dev"
+    PROFILE_BUILD_DIR = "debug"
+
+    ## -----------
+    ## MARK: Front
+    ## -----------
+
+[tasks.set-front-output-dir.env]
+FRONT_OUTPUT_DIR = { source = "${APP_NAME}", default_value = "lapps/front/${APP_NAME}", mapping = { "laplace" = "lapps/front" } }
+
+[tasks.build-front]
+command = "cargo"
+toolchain = "stable"
+args = ["build", "-p", "${APP_NAME}-front", "--target", "wasm32-unknown-unknown", "--profile", "${PROFILE}"]
+dependencies = ["choose-profile-web"]
+
+[tasks.clean-static]
+script_runner = "@duckscript"
+script = '''
+entries = glob_array ${FRONT_OUTPUT_DIR}/*
+for entry in ${entries}
+    if not equals ${entry} ${FRONT_OUTPUT_DIR}/dist
+        rm -r ${entry}
+    end
+end
+'''
+dependencies = ["set-front-output-dir"]
+
+[tasks.copy-static]
+script_runner = "@duckscript"
+script = '''
+if eq ${APP_NAME} "laplace"
+    glob_cp crates/front/webassets/**/* ${FRONT_OUTPUT_DIR}/
+else
+    glob_cp examples/${APP_NAME}/front/webassets/**/* ${FRONT_OUTPUT_DIR}/
+end
+'''
+dependencies = ["set-front-output-dir", "clean-static"]
+
+[tasks.bindgen-front]
+command = "wasm-bindgen"
+args = [
+    "--target",
+    "web",
+    "--no-typescript",
+    "--remove-name-section",
+    "--remove-producers-section",
+    "--out-dir",
+    "${TARGET_DIR}/dist",
+    "--out-name",
+    "${APP_NAME}-front",
+    "${TARGET_DIR}/wasm32-unknown-unknown/${PROFILE_BUILD_DIR}/${APP_NAME}_front.wasm",
+]
+
+[tasks.optimize-front]
+condition = { env = { "PROFILE" = "wasm-release" } }
+command = "wasm-opt"
+args = [
+    "-Oz",
+    "--strip-debug",
+    "-o",
+    "${TARGET_DIR}/dist/${APP_NAME}-front_bg.wasm",
+    "${TARGET_DIR}/dist/${APP_NAME}-front_bg.wasm",
+]
+
+[tasks.clean-dist]
+script_runner = "@duckscript"
+script = '''
+rm -r ${FRONT_OUTPUT_DIR}/dist
+'''
+dependencies = ["set-front-output-dir"]
+
+[tasks.deploy-front]
+script_runner = "@duckscript"
+script = '''
+glob_cp ${TARGET_DIR}/dist/${APP_NAME}-front_bg.wasm ${FRONT_OUTPUT_DIR}/dist/
+glob_cp ${TARGET_DIR}/dist/${APP_NAME}-front.js ${FRONT_OUTPUT_DIR}/dist/
+'''
+dependencies = ["clean-dist"]
+
+[tasks.bundle-front]
+condition = { files_modified = { input = [
+    "${TARGET_DIR}/wasm32-unknown-unknown/${PROFILE_BUILD_DIR}/${APP_NAME}_front.wasm",
+], output = [
+    "${TARGET_DIR}/dist/${APP_NAME}-front_bg.wasm",
+] } }
+run_task = { name = ["bindgen-front", "optimize-front"] }
+dependencies = ["set-front-output-dir", "build-front"]
+
+[tasks.front]
+dependencies = ["bundle-front", "copy-static", "deploy-front"]
+
+## ----------
+## MARK: Back
+## ----------
+
+[tasks.build-back]
+command = "cargo"
+toolchain = "stable"
+args = ["component", "build", "-p", "${APP_NAME}-back", "--profile", "${PROFILE}"]
+dependencies = ["choose-profile"]
+
+[tasks.deploy-back]
+script_runner = "@duckscript"
+script = '''
+cp target/wasm32-wasip1/${PROFILE_BUILD_DIR}/${APP_NAME}_back.wasm ${BACK_OUTPUT_DIR}/${APP_NAME}/${APP_NAME}-back.wasm
+'''
+
+[tasks.back]
+dependencies = ["build-back", "deploy-back"]
+
+## ---------
+## MARK: App
+## ---------
+
+[tasks.build-app]
+toolchain = "stable"
+command = "cargo"
+args = ["tauri", "build"]
+dependencies = ["choose-profile"]
+
+[tasks.build-app-debug]
+extend = "build-app"
+args = ["tauri", "build", "--debug"]
+
+[tasks.app]
+run_task = [
+    { name = ["build-app-debug"], condition = { env = { PROFILE = "dev" } } },
+    { name = ["build-app"], condition = { env_not = { PROFILE = "dev" } } },
+]
+dependencies = ["choose-profile"]
+
+[tasks.laplace]
+run_task = "app"
+dependencies = ["front"]
+
+[tasks.echo]
+env = { "APP_NAME" = "echo" }
+run_task = { name = ["front", "back"] }
+
+[tasks.examples]
+dependencies = ["echo"]
+
+[tasks.all]
+dependencies = ["laplace", "examples"]
+
+## -----------------
+## MARK: Run
+## -----------------
+
+[tasks.start]
+env = { "APP_NAME" = "laplace", RUST_LOG = { value = "info", condition = { env_not_set = ["RUST_LOG"] } } }
+command = "target/${PROFILE}/${APP_NAME}-app"
+dependencies = ["choose-profile"]
+
+[tasks.run]
+extend = "start"
+dependencies = ["all"]
+
+
+[tasks.watch.env]
+WATCH_COMMAND = "cargo make front"
+
+    [tasks.watch.env.debug]
+    WATCH_COMMAND = "cargo make -p debug front"
+
+[tasks.watch]
+command = "watchexec"
+args = ["-r", "-w", "crates/laplace-front", "${WATCH_COMMAND}"]
+dependencies = ["choose-profile"]
+
+## -----------------
+## MARK: Lint & Test
+## -----------------
+
+[tasks.fmt-check]
+toolchain = "nightly"
+command = "cargo"
+args = ["fmt", "--check"]
+
+[tasks.clippy]
+toolchain = "stable"
+command = "cargo"
+args = ["clippy", "--all-targets", "--", "-D", "warnings"]
+dependencies = ["choose-profile"]
+
+[tasks.lint]
+run_task = "clippy"
+dependencies = ["fmt-check"]
+
+[tasks.test]
+toolchain = "stable"
+command = "cargo"
+args = ["test"]
+dependencies = ["choose-profile"]
+
+[tasks.lint-test]
+run_task = "test"
+dependencies = ["lint"]

@@ -1,0 +1,115 @@
+.page {
+  --main-width: 1fr;
+  --menu-width: 15rem;
+  --aside-width: 15rem;
+  --footer-height: 228px;
+  --page-scroll-margin-top: calc(var(--page-header-height, 0px) + 0.5em);
+}
+
+@media screen and (max-width: 920px) {
+  .page {
+    --menu-width: auto;
+    --aside-width: auto;
+  }
+}
+
+@media screen and (min-width: 920px) {
+  .page {
+    .page-menu {
+      border-inline-end: var(--wa-border-width-s) var(--wa-border-style) var(--wa-color-surface-border);
+    }
+  }
+}
+
+.page {
+  min-height: 100dvh;
+  display: grid;
+  grid-template-rows: minmax(0px, auto) minmax(0px, 1fr) minmax(0px, auto);
+  grid-template-columns: 100%;
+  width: 100%;
+  grid-template-areas:
+    "header"
+    "body  " 
+    "footer";
+
+  .page-header, > header {
+    display: flex;
+    flex-wrap: wrap;
+    grid-area: header;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    gap: var(--wa-space-s);
+    padding: var(--wa-space-s);
+    --wa-link-decoration-default: none;
+    border-block-end: var(--wa-border-width-s) var(--wa-border-style) var(--wa-color-surface-border);
+    background-color: var(--wa-color-surface-default);
+
+    a {
+      font-weight: var(--wa-font-weight-action);
+    }
+  }
+
+  .page-body {
+    display: grid;
+    min-height: 100%;
+    align-items: flex-start;
+    grid-area: body;
+    grid-template-columns: minmax(0, var(--menu-width)) minmax(0, var(--main-width)) minmax(0, var(--aside-width));
+    grid-template-rows: minmax(0px, 1fr);
+    grid-template-areas: "menu main aside";
+  }
+
+  .page-menu {
+    position: sticky;
+    top: var(--page-header-height, 0);
+    z-index: 4;
+    grid-area: menu;
+    height: calc(100dvh - var(--page-header-height, 0));
+    overflow: auto;
+
+    a {
+      --wa-color-text-link: var(--wa-color-text-normal);
+    }
+  }
+
+  .page-menu-nav {
+    display: flex;
+    flex-direction: column;
+    gap: var(--wa-space-s);
+    padding: var(--wa-space-m);
+  }
+
+  .page-main, .page-body > main {
+  }
+
+  .page-aside, .page-body > aside {
+    position: sticky;
+    top: var(--page-header-height, 0);
+    z-index: 4;
+    grid-area: aside;
+    height: calc(100dvh - var(--page-header-height, 0));
+    overflow: auto;
+  }
+
+  .page-footer, > footer {
+    align-items: start;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--wa-space-m);
+    padding: var(--wa-space-3xl);
+    --wa-color-text-link: var(--wa-color-text-quiet);
+    background-color: var(--wa-color-surface-lowered);
+    font-size: var(--wa-font-size-s);
+  }
+}
+
+.page :is(*, *:after, *:before) {
+  scroll-margin-top: var(--page-scroll-margin-top);
+}
+
+.wa-flank {
+  --flank-size: 1.25em;
+}

@@ -1,0 +1,115 @@
+.input {
+  display: flex;
+  flex-direction: column;
+}
+
+.input .label {
+  display: inline-flex;
+  color: var(--wa-form-control-label-color);
+  font-weight: var(--wa-form-control-label-font-weight);
+  line-height: var(--wa-form-control-label-line-height);
+  margin-block-end: 0.5em;
+}
+
+.input.required .label::after {
+  content: var(--wa-form-control-required-content, '*');
+  margin-inline-start: var(--wa-form-control-required-content-offset, 0.125em);
+  color: var(--wa-form-control-required-content-color, var(--wa-color-danger-on-quiet));
+}
+
+.input .hint {
+  display: block;
+  color: var(--wa-form-control-hint-color);
+  font-weight: var(--wa-form-control-hint-font-weight);
+  line-height: var(--wa-form-control-hint-line-height);
+  margin-block-start: 0.5em;
+  font-size: var(--wa-font-size-smaller);
+}
+
+/* Text field (the box rendered around the native input). Base styles match the `outlined` appearance. */
+.input .text-field {
+  display: flex;
+  align-items: stretch;
+  justify-content: start;
+  position: relative;
+  height: var(--wa-form-control-height);
+  border-color: var(--wa-form-control-border-color);
+  border-radius: var(--wa-form-control-border-radius);
+  border-style: var(--wa-form-control-border-style);
+  border-width: var(--wa-form-control-border-width);
+  cursor: text;
+  color: var(--wa-form-control-value-color);
+  font-size: var(--wa-form-control-value-font-size);
+  font-family: inherit;
+  font-weight: var(--wa-form-control-value-font-weight);
+  line-height: var(--wa-form-control-value-line-height);
+  vertical-align: middle;
+  width: 100%;
+  background-color: var(--wa-form-control-background-color);
+  padding: 0 var(--wa-form-control-padding-inline);
+  /* The base outline must stay transparent (not absent): the focus ring color
+   * is transitioned, and with no base outline it would animate from
+   * currentColor, flashing a dark ring at the focus moment. */
+  outline: var(--wa-focus-ring-style) var(--wa-focus-ring-width) transparent;
+  outline-offset: var(--wa-focus-ring-offset);
+  transition:
+    background-color var(--wa-transition-normal),
+    border-color var(--wa-transition-normal),
+    outline-color var(--wa-transition-fast);
+  transition-timing-function: var(--wa-transition-easing);
+}
+
+.input .text-field:focus-within {
+  outline-color: var(--wa-color-focus);
+}
+
+/* Disabled state */
+.input .text-field:has(:disabled) {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Appearance modifiers */
+.input.outlined .text-field {
+  background-color: var(--wa-form-control-background-color);
+  border-color: var(--wa-form-control-border-color);
+}
+
+.input.filled .text-field {
+  background-color: var(--wa-color-neutral-fill-quiet);
+  border-color: var(--wa-color-neutral-fill-quiet);
+}
+
+.input.filled-outlined .text-field {
+  background-color: var(--wa-color-neutral-fill-quiet);
+  border-color: var(--wa-form-control-border-color);
+}
+
+/* Pill modifier */
+.input.pill .text-field {
+  border-radius: var(--wa-border-radius-pill);
+}
+
+/* Native input control */
+.input .control {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: none;
+  outline: none;
+  box-shadow: none;
+  margin: 0;
+  cursor: inherit;
+  appearance: none;
+  -webkit-appearance: none;
+  font: inherit;
+  color: inherit;
+  background-color: transparent;
+}
+
+.input .control::placeholder {
+  color: var(--wa-form-control-placeholder-color);
+  user-select: none;
+  -webkit-user-select: none;
+}

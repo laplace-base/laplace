@@ -1,0 +1,288 @@
+.dropdown {
+  --show-duration: var(--wa-transition-fast);
+  --hide-duration: var(--wa-transition-fast);
+
+  /* The trigger and the menu are laid out by the popup, so the host itself
+   * takes no place in the flow. */
+  display: contents;
+}
+
+/* The menu floats above the page, like the select's listbox */
+.dropdown .popup-body {
+  z-index: 900;
+}
+
+/* Menus: the top level one and every submenu share their look */
+.dropdown .dropdown-menu,
+.dropdown .dropdown-submenu {
+  display: flex;
+  flex-direction: column;
+  width: max-content;
+  margin: 0;
+  padding: 0.25em;
+  border-color: var(--wa-color-surface-border);
+  border-radius: var(--wa-border-radius-m);
+  border-style: var(--wa-border-style);
+  border-width: var(--wa-border-width-s);
+  background-color: var(--wa-color-surface-raised);
+  box-shadow: var(--wa-shadow-m);
+  color: var(--wa-color-text-normal);
+  font: inherit;
+  text-align: start;
+  user-select: none;
+  -webkit-user-select: none;
+  overflow: auto;
+  overscroll-behavior: none;
+  max-width: var(--auto-size-available-width, none);
+  max-height: var(--auto-size-available-height, min(24em, 50vh));
+  transform-origin: top;
+}
+
+/* Submenus are positioned in viewport coordinates, like the popup body */
+.dropdown .dropdown-submenu {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 901;
+}
+
+/* Group labels and dividers between groups of items */
+.dropdown .dropdown-menu h1,
+.dropdown .dropdown-menu h2,
+.dropdown .dropdown-menu h3,
+.dropdown .dropdown-menu h4,
+.dropdown .dropdown-menu h5,
+.dropdown .dropdown-menu h6,
+.dropdown .dropdown-submenu h1,
+.dropdown .dropdown-submenu h2,
+.dropdown .dropdown-submenu h3,
+.dropdown .dropdown-submenu h4,
+.dropdown .dropdown-submenu h5,
+.dropdown .dropdown-submenu h6 {
+  display: block;
+  margin: 0.25em 0;
+  padding: 0.25em 0.75em;
+  color: var(--wa-color-text-quiet);
+  font-family: var(--wa-font-family-body);
+  font-weight: var(--wa-font-weight-semibold);
+  font-size: var(--wa-font-size-smaller);
+}
+
+.dropdown .dropdown-menu .divider,
+.dropdown .dropdown-submenu .divider {
+  --spacing: 0.25em;
+}
+
+/* Transform origins follow the resolved placement */
+.dropdown > .popup[data-current-placement^='top'] .dropdown-menu,
+.dropdown .dropdown-submenu[data-placement^='top'] {
+  transform-origin: bottom;
+}
+
+.dropdown > .popup[data-current-placement^='bottom'] .dropdown-menu,
+.dropdown .dropdown-submenu[data-placement^='bottom'] {
+  transform-origin: top;
+}
+
+.dropdown > .popup[data-current-placement^='left'] .dropdown-menu,
+.dropdown .dropdown-submenu[data-placement^='left'] {
+  transform-origin: right;
+}
+
+.dropdown > .popup[data-current-placement^='right'] .dropdown-menu,
+.dropdown .dropdown-submenu[data-placement^='right'] {
+  transform-origin: left;
+}
+
+.dropdown > .popup[data-current-placement='left-start'] .dropdown-menu,
+.dropdown .dropdown-submenu[data-placement='left-start'] {
+  transform-origin: right top;
+}
+
+.dropdown > .popup[data-current-placement='left-end'] .dropdown-menu,
+.dropdown .dropdown-submenu[data-placement='left-end'] {
+  transform-origin: right bottom;
+}
+
+.dropdown > .popup[data-current-placement='right-start'] .dropdown-menu,
+.dropdown .dropdown-submenu[data-placement='right-start'] {
+  transform-origin: left top;
+}
+
+.dropdown > .popup[data-current-placement='right-end'] .dropdown-menu,
+.dropdown .dropdown-submenu[data-placement='right-end'] {
+  transform-origin: left bottom;
+}
+
+/* Show and hide animations */
+.dropdown .dropdown-menu.show,
+.dropdown .dropdown-submenu.show {
+  animation: dropdown-show var(--show-duration) var(--wa-transition-easing);
+}
+
+.dropdown .dropdown-menu.hide,
+.dropdown .dropdown-submenu.hide {
+  animation: dropdown-show var(--hide-duration) var(--wa-transition-easing) reverse;
+}
+
+@keyframes dropdown-show {
+  from {
+    opacity: 0;
+    scale: 0.9;
+  }
+  to {
+    opacity: 1;
+    scale: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dropdown .dropdown-menu.show,
+  .dropdown .dropdown-menu.hide,
+  .dropdown .dropdown-submenu.show,
+  .dropdown .dropdown-submenu.hide {
+    animation: none;
+  }
+}
+
+/* Items */
+.dropdown-item {
+  display: flex;
+  position: relative;
+  align-items: center;
+  padding: 0.5em 1em;
+  border-radius: var(--wa-border-radius-s);
+  isolation: isolate;
+  color: var(--wa-color-text-normal);
+  font: inherit;
+  line-height: var(--wa-line-height-condensed);
+  cursor: pointer;
+  transition:
+    var(--wa-transition-fast) background-color var(--wa-transition-easing),
+    var(--wa-transition-fast) color var(--wa-transition-easing);
+}
+
+@media (hover: hover) {
+  .dropdown-item:not(.disabled):hover {
+    background-color: var(--wa-color-neutral-fill-normal);
+  }
+}
+
+/* The `active` item is the one the keyboard operates on: it only carries the
+ * focus, the highlight comes from `:focus-visible`, so opening the menu with a
+ * pointer doesn't leave the first item looking hovered. */
+.dropdown-item.submenu-open,
+.dropdown-item:focus-visible {
+  z-index: 1;
+  background-color: var(--wa-color-neutral-fill-normal);
+}
+
+.dropdown-item:focus {
+  outline: none;
+}
+
+.dropdown-item:focus-visible {
+  outline: var(--wa-focus-ring);
+}
+
+.dropdown-item.disabled {
+  outline: none;
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Danger variant */
+.dropdown-item.danger,
+.dropdown-item.danger > .dropdown-item-details {
+  color: var(--wa-color-danger-on-quiet);
+}
+
+@media (hover: hover) {
+  .dropdown-item.danger:not(.disabled):hover {
+    background-color: var(--wa-color-danger-fill-normal);
+    color: var(--wa-color-danger-on-normal);
+  }
+}
+
+.dropdown-item.danger.submenu-open,
+.dropdown-item.danger:focus-visible {
+  background-color: var(--wa-color-danger-fill-normal);
+  color: var(--wa-color-danger-on-normal);
+}
+
+/* Alignment with checkable and submenu siblings */
+.dropdown-item.checkbox-adjacent {
+  padding-inline-start: 2em;
+}
+
+/* An item opens a submenu when it holds one: the markup is the state, so no
+ * class mirrors it. */
+.dropdown-item:has(> .dropdown-submenu) {
+  /* Leave room for the absolutely positioned submenu indicator */
+  padding-inline-end: 2.75em;
+}
+
+.dropdown-item.submenu-adjacent:has(> .dropdown-submenu) > .dropdown-item-details {
+  padding-inline-end: 1.75em;
+}
+
+/* Checkmark. The parts of an item are addressed as direct children: a submenu
+ * nests items into their parent item, so a descendant selector would leak into
+ * the level below. */
+.dropdown-item > .check {
+  display: flex;
+  align-items: center;
+  visibility: hidden;
+  margin-inline-start: -1.5em;
+  margin-inline-end: 0.5em;
+  font-size: var(--wa-font-size-smaller);
+}
+
+.dropdown-item.checked > .check {
+  visibility: visible;
+}
+
+/* Icon, label and details */
+.dropdown-item > .dropdown-item-icon:not(:empty) {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  margin-inline-end: 0.75em;
+  font-size: var(--wa-font-size-smaller);
+}
+
+.dropdown-item > .dropdown-item-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.dropdown-item > .dropdown-item-details {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: end;
+  margin-inline-start: 2em;
+  color: var(--wa-color-text-quiet);
+  font-size: var(--wa-font-size-smaller);
+}
+
+.dropdown-item.danger:not(.disabled):hover > .dropdown-item-details,
+.dropdown-item.danger.submenu-open > .dropdown-item-details,
+.dropdown-item.danger:focus-visible > .dropdown-item-details {
+  color: inherit;
+}
+
+/* Submenu indicator */
+.dropdown-item > .submenu-icon {
+  display: flex;
+  position: absolute;
+  align-items: center;
+  inset-inline-end: 1em;
+  color: var(--wa-color-neutral-on-quiet);
+  font-size: var(--wa-font-size-smaller);
+}
+
+/* Flip the chevron when RTL */
+.dropdown-item:dir(rtl) > .submenu-icon {
+  transform: scaleX(-1);
+}

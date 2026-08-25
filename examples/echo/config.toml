@@ -1,0 +1,12 @@
+[application]
+title = "Echo"
+enabled = true
+description = "The Echo local-first web app example"
+tags = ["example", "echo"]
+autoload = true
+
+[permissions.front]
+required = ["invoke_back"]
+allowed = ["invoke_back"]
+
+[permissions.back]

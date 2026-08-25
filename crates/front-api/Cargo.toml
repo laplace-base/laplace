@@ -1,0 +1,16 @@
+[package]
+name = "laplace-front-api"
+version = "0.1.0"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The frontend API of the local-first web-application platform"
+
+[dependencies]
+futures = { workspace = true }
+laplace-common-api = { workspace = true }
+serde = { workspace = true }
+serde-wasm-bindgen = { workspace = true }
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }

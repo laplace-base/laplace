@@ -1,0 +1,86 @@
+.tag {
+  display: inline-flex;
+  gap: 0.5em;
+  border-radius: var(--wa-border-radius-m);
+  align-items: center;
+  background-color: var(--wa-color-fill-quiet, var(--wa-color-neutral-fill-quiet));
+  border-color: var(--wa-color-border-normal, var(--wa-color-neutral-border-normal));
+  border-style: var(--wa-border-style);
+  border-width: var(--wa-border-width-s);
+  color: var(--wa-color-on-quiet, var(--wa-color-neutral-on-quiet));
+  font-size: inherit;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-user-select: none;
+  height: calc(var(--wa-form-control-height) * 0.8);
+  line-height: calc(var(--wa-form-control-height) - var(--wa-form-control-border-width) * 2);
+  padding: 0 0.75em;
+}
+
+/* Appearance modifiers */
+.tag.outlined {
+  color: var(--wa-color-on-quiet, var(--wa-color-neutral-on-quiet));
+  background-color: transparent;
+  border-color: var(--wa-color-border-loud, var(--wa-color-neutral-border-loud));
+}
+
+.tag.filled {
+  color: var(--wa-color-on-quiet, var(--wa-color-neutral-on-quiet));
+  background-color: var(--wa-color-fill-quiet, var(--wa-color-neutral-fill-quiet));
+  border-color: transparent;
+}
+
+.tag.filled-outlined {
+  color: var(--wa-color-on-quiet, var(--wa-color-neutral-on-quiet));
+  background-color: var(--wa-color-fill-quiet, var(--wa-color-neutral-fill-quiet));
+  border-color: var(--wa-color-border-normal, var(--wa-color-neutral-border-normal));
+}
+
+.tag.accent {
+  color: var(--wa-color-on-loud, var(--wa-color-neutral-on-loud));
+  background-color: var(--wa-color-fill-loud, var(--wa-color-neutral-fill-loud));
+  border-color: transparent;
+}
+
+.tag .tag-content {
+  font-size: var(--wa-font-size-smaller);
+}
+
+/* Remove button */
+.tag .tag-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  height: 1em;
+  width: 1em;
+  border: none;
+  outline: none;
+  background: none;
+  color: currentColor;
+  font-size: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.tag .tag-remove svg {
+  width: 1em;
+  height: 1em;
+}
+
+@media (hover: hover) {
+  .tag:hover > .tag-remove {
+    background-color: transparent;
+    color: color-mix(in oklab, currentColor, var(--wa-color-mix-hover));
+  }
+}
+
+.tag:active > .tag-remove {
+  background-color: transparent;
+  color: color-mix(in oklab, currentColor, var(--wa-color-mix-active));
+}
+
+/* Pill modifier */
+.tag.pill {
+  border-radius: var(--wa-border-radius-pill);
+}

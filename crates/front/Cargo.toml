@@ -1,0 +1,37 @@
+[package]
+name = "laplace-front"
+version = "0.1.0"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The frontend of the local-first web-application platform"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+console_log = { workspace = true }
+hypertext = { workspace = true }
+iconic = { workspace = true }
+laplace-front-api = { workspace = true }
+log = { workspace = true }
+serde = { workspace = true }
+serde-wasm-bindgen = { workspace = true }
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+wasm-dom = { workspace = true }
+web-sys = { workspace = true, features = [
+    "Document",
+    "DomTokenList",
+    "Element",
+    "Event",
+    "EventTarget",
+    "HtmlInputElement",
+    "IntersectionObserver",
+    "IntersectionObserverEntry",
+    "Node",
+    "Window",
+] }
+wingy-hypertext = { workspace = true }
+wingy-hypertext-web = { workspace = true }

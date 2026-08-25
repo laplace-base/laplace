@@ -1,0 +1,240 @@
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  user-select: none;
+  -webkit-user-select: none;
+  white-space: nowrap;
+  vertical-align: middle;
+  transition-property: background, border, box-shadow, color, opacity, transform;
+  transition-duration: var(--wa-transition-fast);
+  transition-timing-function: var(--wa-transition-easing);
+  transform-origin: center;
+  cursor: pointer;
+  padding: 0 var(--wa-form-control-padding-inline);
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: var(--wa-font-weight-action);
+  height: var(--wa-form-control-height);
+
+  background-color: var(--wa-color-fill-loud, var(--wa-color-neutral-fill-loud));
+  border-color: transparent;
+  color: var(--wa-color-on-loud, var(--wa-color-neutral-on-loud));
+  border-start-start-radius: var(--_button-start-start-radius, var(--wa-form-control-border-radius));
+  border-start-end-radius: var(--_button-start-end-radius, var(--wa-form-control-border-radius));
+  border-end-start-radius: var(--_button-end-start-radius, var(--wa-form-control-border-radius));
+  border-end-end-radius: var(--_button-end-end-radius, var(--wa-form-control-border-radius));
+  border-style: var(--wa-form-control-border-style);
+  border-width: var(--wa-form-control-border-width);
+}
+
+/* Hover and active transforms */
+.button:not(.disabled):not(.loading) {
+  @media (hover: hover) {
+    &:hover {
+      transform: var(--wa-button-transform-hover);
+    }
+  }
+  &:active {
+    transform: var(--wa-button-transform-active);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    &:hover,
+    &:active {
+      transform: none;
+    }
+  }
+}
+
+/* Appearance modifiers */
+.button.plain {
+  /* Indentation overrides for grouping */
+  margin-inline-start: var(--_button-horizontal-indent);
+  margin-block-start: var(--_button-vertical-indent);
+
+  color: var(--wa-color-on-quiet, var(--wa-color-neutral-on-quiet));
+  background-color: transparent;
+  border-color: transparent;
+
+  @media (hover: hover) {
+    &:not(.disabled):not(.loading):hover {
+      color: var(--wa-color-on-quiet, var(--wa-color-neutral-on-quiet));
+      background-color: var(--wa-color-fill-quiet, var(--wa-color-neutral-fill-quiet));
+    }
+  }
+  &:not(.disabled):not(.loading):active {
+    color: var(--wa-color-on-quiet, var(--wa-color-neutral-on-quiet));
+    background-color: color-mix(
+      in oklab,
+      var(--wa-color-fill-quiet, var(--wa-color-neutral-fill-quiet)),
+      var(--wa-color-mix-active)
+    );
+  }
+}
+
+.button.outlined {
+  /* Indentation overrides for grouping outlined */
+  margin-inline-start: var(--_button-horizontal-indent-outlined);
+  margin-block-start: var(--_button-vertical-indent-outlined);
+
+  color: var(--wa-color-on-quiet, var(--wa-color-neutral-on-quiet));
+  background-color: transparent;
+  border-color: var(--wa-color-border-loud, var(--wa-color-neutral-border-loud));
+
+  @media (hover: hover) {
+    &:not(.disabled):not(.loading):hover {
+      color: var(--wa-color-on-quiet, var(--wa-color-neutral-on-quiet));
+      background-color: var(--wa-color-fill-quiet, var(--wa-color-neutral-fill-quiet));
+    }
+  }
+  &:not(.disabled):not(.loading):active {
+    color: var(--wa-color-on-quiet, var(--wa-color-neutral-on-quiet));
+    background-color: color-mix(
+      in oklab,
+      var(--wa-color-fill-quiet, var(--wa-color-neutral-fill-quiet)),
+      var(--wa-color-mix-active)
+    );
+  }
+}
+
+.button.filled {
+  /* Indentation overrides for grouping */
+  margin-inline-start: var(--_button-horizontal-indent);
+  margin-block-start: var(--_button-vertical-indent);
+
+  color: var(--wa-color-on-normal, var(--wa-color-neutral-on-normal));
+  background-color: var(--wa-color-fill-normal, var(--wa-color-neutral-fill-normal));
+  border-color: transparent;
+
+  @media (hover: hover) {
+    &:not(.disabled):not(.loading):hover {
+      color: var(--wa-color-on-normal, var(--wa-color-neutral-on-normal));
+      background-color: color-mix(
+        in oklab,
+        var(--wa-color-fill-normal, var(--wa-color-neutral-fill-normal)),
+        var(--wa-color-mix-hover)
+      );
+    }
+  }
+  &:not(.disabled):not(.loading):active {
+    color: var(--wa-color-on-normal, var(--wa-color-neutral-on-normal));
+    background-color: color-mix(
+      in oklab,
+      var(--wa-color-fill-normal, var(--wa-color-neutral-fill-normal)),
+      var(--wa-color-mix-active)
+    );
+  }
+}
+
+.button.filled-outlined {
+  /* Indentation overrides for grouping outlined */
+  margin-inline-start: var(--_button-horizontal-indent-outlined);
+  margin-block-start: var(--_button-vertical-indent-outlined);
+
+  color: var(--wa-color-on-normal, var(--wa-color-neutral-on-normal));
+  background-color: var(--wa-color-fill-normal, var(--wa-color-neutral-fill-normal));
+  border-color: var(--wa-color-border-normal, var(--wa-color-neutral-border-normal));
+
+  @media (hover: hover) {
+    &:not(.disabled):not(.loading):hover {
+      color: var(--wa-color-on-normal, var(--wa-color-neutral-on-normal));
+      background-color: color-mix(
+        in oklab,
+        var(--wa-color-fill-normal, var(--wa-color-neutral-fill-normal)),
+        var(--wa-color-mix-hover)
+      );
+    }
+  }
+  &:not(.disabled):not(.loading):active {
+    color: var(--wa-color-on-normal, var(--wa-color-neutral-on-normal));
+    background-color: color-mix(
+      in oklab,
+      var(--wa-color-fill-normal, var(--wa-color-neutral-fill-normal)),
+      var(--wa-color-mix-active)
+    );
+  }
+}
+
+.button.accent {
+  /* Indentation overrides for grouping */
+  margin-inline-start: var(--_button-horizontal-indent);
+  margin-block-start: var(--_button-vertical-indent);
+
+  color: var(--wa-color-on-loud, var(--wa-color-neutral-on-loud));
+  background-color: var(--wa-color-fill-loud, var(--wa-color-neutral-fill-loud));
+  border-color: transparent;
+
+  @media (hover: hover) {
+    &:not(.disabled):not(.loading):hover {
+      background-color: color-mix(
+        in oklab,
+        var(--wa-color-fill-loud, var(--wa-color-neutral-fill-loud)),
+        var(--wa-color-mix-hover)
+      );
+    }
+  }
+  &:not(.disabled):not(.loading):active {
+    background-color: color-mix(
+      in oklab,
+      var(--wa-color-fill-loud, var(--wa-color-neutral-fill-loud)),
+      var(--wa-color-mix-active)
+    );
+  }
+}
+
+/* Focus states */
+.button:focus {
+  outline: none;
+}
+
+.button:focus-visible {
+  outline: var(--wa-focus-ring);
+  outline-offset: var(--wa-focus-ring-offset);
+}
+
+/* Disabled state */
+.button.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+
+  /* When disabled, prevent mouse events from bubbling up from children */
+  pointer-events: none;
+}
+
+/* Keep it last so Safari doesn't stop parsing this block */
+.button::-moz-focus-inner {
+  border: 0;
+}
+
+/* Icon buttons */
+.button:has(.icon) {
+  padding: 0 0.75em;
+}
+
+/* Pill modifier */
+.button.pill {
+  border-start-start-radius: var(--_button-start-start-radius, var(--wa-border-radius-pill));
+  border-start-end-radius: var(--_button-start-end-radius, var(--wa-border-radius-pill));
+  border-end-start-radius: var(--_button-end-start-radius, var(--wa-border-radius-pill));
+  border-end-end-radius: var(--_button-end-end-radius, var(--wa-border-radius-pill));
+}
+
+.button {
+  .start,
+  .end {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    pointer-events: none;
+  }
+
+  .start {
+    margin-inline-end: 0.75em;
+  }
+
+  .end {
+    margin-inline-start: 0.75em;
+  }
+}

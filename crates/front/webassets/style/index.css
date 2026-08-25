@@ -1,0 +1,41 @@
+@import url("common/index.css");
+
+@import url("components/badge.css");
+@import url("components/button.css");
+@import url("components/callout.css");
+@import url("components/copy_button.css");
+@import url("components/dropdown.css");
+@import url("components/head.css");
+@import url("components/input.css");
+@import url("components/select.css");
+@import url("components/switch.css");
+@import url("components/tag.css");
+@import url("components/tooltip.css");
+
+@import url("layouts/code_example.css");
+@import url("layouts/divider.css");
+@import url("layouts/drawer.css");
+@import url("layouts/page.css");
+
+@import url("helpers/animation.css");
+@import url("helpers/popup.css");
+
+@import url("utils/icon.css");
+
+html {
+  scroll-behavior: smooth;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+@media screen and (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+.border-end {
+  border-block-end: var(--wa-border-width-s) var(--wa-border-style) var(--wa-color-surface-border);
+}

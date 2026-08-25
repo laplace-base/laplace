@@ -1,0 +1,24 @@
+[package]
+name = "echo-front"
+version = "0.1.0"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The Echo lapp example"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+console_log = { workspace = true }
+hypertext = { workspace = true }
+iconic = { workspace = true }
+laplace-front-api = { workspace = true }
+log = { workspace = true }
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+wasm-dom = { workspace = true }
+web-sys = { workspace = true, features = ["Window", "Document", "HtmlInputElement"] }
+wingy-hypertext = { workspace = true }
+wingy-hypertext-web = { workspace = true }

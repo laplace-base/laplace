@@ -1,0 +1,53 @@
+package laplace:http;
+
+interface types {
+    enum method {
+        options,
+        get,
+        post,
+        put,
+        delete,
+        head,
+        trace,
+        connect,
+        patch,
+    }
+
+    record uri {
+        scheme: string,
+        authority: string,
+        path-and-query: string,
+    }
+
+    record header {
+        name: string,
+        value: list<u8>,
+    }
+
+    record request {
+        method: method,
+        uri: uri,
+        version: string,
+        headers: list<header>,
+        body: list<u8>,
+    }
+
+    record response {
+        status: u16,
+        version: string,
+        headers: list<header>,
+        body: list<u8>,
+    }
+
+}
+
+interface by-client-handler {
+    use types.{request, response};
+
+    handle: func(request: request) -> response;
+}
+
+world http {
+    export types;
+    export by-client-handler;
+}

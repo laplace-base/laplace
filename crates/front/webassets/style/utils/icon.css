@@ -1,0 +1,73 @@
+.icon {
+  --primary-color: currentColor;
+  --primary-opacity: 1;
+  --secondary-color: currentColor;
+  --secondary-opacity: 0.4;
+  --rotate-angle: 0deg;
+
+  box-sizing: content-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: -0.125em;
+}
+
+  /* Standard */
+.icon:not([data-auto-width]) {
+  width: 1.25em;
+  height: 1em;
+}
+
+  /* Auto-width */
+.icon[data-auto-width] {
+  width: auto;
+  height: 1em;
+}
+
+svg {
+  height: 1em;
+  overflow: visible;
+  width: auto;
+
+  /* Duotone colors with path-specific opacity fallback */
+  path[data-duotone-primary] {
+    color: var(--primary-color);
+    opacity: var(--path-opacity, var(--primary-opacity));
+  }
+
+  path[data-duotone-secondary] {
+    color: var(--secondary-color);
+    opacity: var(--path-opacity, var(--secondary-opacity));
+  }
+}
+
+  /* Rotation */
+.icon[data-rotate] {
+  transform: rotate(var(--rotate-angle, 0deg));
+}
+
+  /* Flipping */
+.icon[data-flip='x'] {
+  transform: scaleX(-1);
+}
+.icon[data-flip='y'] {
+  transform: scaleY(-1);
+}
+.icon[data-flip='both'] {
+  transform: scale(-1, -1);
+}
+
+  /* Rotation and Flipping combined */
+.icon[data-rotate][data-flip='x'] {
+  transform: rotate(var(--rotate-angle, 0deg)) scaleX(-1);
+}
+.icon[data-rotate][data-flip='y'] {
+  transform: rotate(var(--rotate-angle, 0deg)) scaleY(-1);
+}
+.icon[data-rotate][data-flip='both'] {
+  transform: rotate(var(--rotate-angle, 0deg)) scale(-1, -1);
+}
+
+.icon.icon-shrink {
+  font-size: round(0.875em, 1px);
+}

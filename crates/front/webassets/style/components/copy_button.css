@@ -1,0 +1,79 @@
+.copy-button {
+  &.button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background-color: transparent;
+    border: none;
+    border-radius: var(--wa-form-control-border-radius);
+    color: inherit;
+    font-size: inherit;
+    height: calc(var(--wa-form-control-height) * 0.8);
+    aspect-ratio: 1;
+    cursor: pointer;
+    transition-property: background-color, color;
+    transition-duration: var(--wa-transition-fast);
+    transition-timing-function: var(--wa-transition-easing);
+  }
+
+  &.button[disabled] {
+    opacity: 0.5;
+    cursor: not-allowed !important;
+  }
+
+  @media (hover: hover) {
+    &:hover:not([disabled]) {
+      background-color: var(--wa-color-neutral-fill-quiet);
+      color: color-mix(in oklab, currentColor, var(--wa-color-mix-hover));
+    }
+  }
+
+  &:focus-visible:not([disabled]) {
+    background-color: var(--wa-color-neutral-fill-quiet);
+    color: color-mix(in oklab, currentColor, var(--wa-color-mix-hover));
+  }
+
+  &:active:not([disabled]) {
+    color: color-mix(in oklab, currentColor, var(--wa-color-mix-active));
+  }
+
+  &:focus-visible {
+    outline: var(--wa-focus-ring);
+    outline-offset: var(--wa-focus-ring-offset);
+  }
+}
+
+.copy-button-success {
+  color: inherit;
+}
+
+.copy-button-error {
+  color: var(--wa-color-danger-on-quiet);
+}
+
+/* Icon swap animation */
+.show {
+  animation: copy-button-icon-show var(--wa-transition-fast) var(--wa-transition-easing);
+}
+
+.hide {
+  animation: copy-button-icon-show var(--wa-transition-fast) var(--wa-transition-easing) reverse;
+}
+
+@keyframes copy-button-icon-show {
+  from {
+    scale: 0.25;
+    opacity: 0.25;
+  }
+  to {
+    scale: 1;
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .show,
+  .hide {
+    animation-duration: 1ms;
+  }
+}

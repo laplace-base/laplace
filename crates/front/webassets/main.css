@@ -1,0 +1,25 @@
+@import url("/style/index.css");
+
+:root {
+  /* max-width for fixed width app-based pages
+   * We round() these to avoid obscure component rendering bugs caused by widths with fractional pixels */
+  --content-width-l: round(up, 132ch, 1px);
+  --content-width-m: round(up, 110ch, 1px);
+  --content-width-s: round(up, 80ch, 1px);
+  --content-width-xs: round(up, 50ch, 1px);
+  --content-padding-inline: 4ch;
+  --content-flow-spacing: 8ch;
+
+  --line-length-xs: 30ch;
+  --line-length-s: 45ch;
+  --line-length-m: 66ch;
+  --line-length-l: 77ch;
+  --line-length-xl: 90ch;
+  --line-length-none: none;
+}
+
+.main-content {
+  max-width: var(--content-width-l);
+  padding: var(--wa-space-xl);
+  margin-inline: auto;
+}

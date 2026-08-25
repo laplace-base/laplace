@@ -1,0 +1,76 @@
+.callout {
+    display: flex;
+    position: relative;
+    align-items: stretch;
+    border-radius: var(--wa-panel-border-radius);
+    background-color: var(--wa-color-fill-quiet, var(--wa-color-brand-fill-quiet));
+    border-color: var(--wa-color-border-quiet, var(--wa-color-brand-border-quiet));
+    border-style: var(--wa-panel-border-style);
+    border-width: var(--wa-panel-border-width);
+    color: var(--wa-color-text-normal);
+    padding: 1em;
+}
+
+/* Appearance modifiers */
+.callout.plain {
+    background-color: transparent;
+    border-color: transparent;
+}
+
+.callout.outlined {
+    background-color: transparent;
+    border-color: var(--wa-color-border-loud, var(--wa-color-brand-border-loud));
+}
+
+.callout.filled {
+    background-color: var(--wa-color-fill-quiet, var(--wa-color-brand-fill-quiet));
+    border-color: transparent;
+}
+
+.callout.filled-outlined {
+    border-color: var(--wa-color-border-quiet, var(--wa-color-brand-border-quiet));
+}
+
+.callout.accent {
+    background-color: var(--wa-color-fill-loud, var(--wa-color-brand-fill-loud));
+    border-color: transparent;
+
+    &, & button.close:not(:hover) {
+        color: var(--wa-color-on-loud, var(--wa-color-brand-on-loud));
+    }
+
+    & .callout-icon {
+        color: currentColor;
+    }
+}
+
+/* A plain button (e.g. a close button) hovered inside a callout gets the same
+ * quiet fill the callout itself is painted with, so the hover state is invisible
+ * on filled/filled-outlined callouts. Mix it further, like filled buttons do. */
+@media (hover: hover) {
+  .callout.filled .button.plain:not(.disabled):not(.loading):hover,
+  .callout.filled-outlined .button.plain:not(.disabled):not(.loading):hover {
+    background-color: color-mix(
+      in oklab,
+      var(--wa-color-fill-quiet, var(--wa-color-brand-fill-quiet)),
+      var(--wa-color-mix-hover)
+    );
+  }
+}
+
+@scope (.callout) {
+    .callout-icon {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        color: var(--wa-color-on-quiet);
+        font-size: 1.25em;
+        margin-inline-end: var(--wa-form-control-padding-inline);
+    }
+
+    .callout-message {
+        flex: 1 1 auto;
+        display: block;
+        overflow: hidden;
+    }
+}

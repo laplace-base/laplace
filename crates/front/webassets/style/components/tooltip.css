@@ -1,0 +1,63 @@
+.tooltip {
+  --max-width: 30ch;
+  --show-duration: var(--wa-transition-fast);
+  --hide-duration: var(--wa-transition-fast);
+
+  /* The tooltip is laid out by the popup next to its anchor, so the host
+   * itself takes no place in the flow. */
+  display: contents;
+
+  /* Defaults for the properties the body inherits */
+  color: var(--wa-tooltip-content-color);
+  font-size: var(--wa-tooltip-font-size);
+  line-height: var(--wa-tooltip-line-height);
+  text-align: start;
+  white-space: normal;
+}
+
+.tooltip > .popup {
+  --arrow-color: var(--wa-tooltip-background-color);
+  --arrow-size: var(--wa-tooltip-arrow-size);
+  --popup-border-width: var(--wa-tooltip-border-width);
+}
+
+/* Tooltips float above everything else, dropdown menus included */
+.tooltip > .popup > .popup-body {
+  z-index: 1000;
+}
+
+.tooltip > .popup .arrow {
+  border-right: var(--wa-tooltip-border-width) var(--wa-tooltip-border-style) var(--wa-tooltip-border-color);
+  border-bottom: var(--wa-tooltip-border-width) var(--wa-tooltip-border-style) var(--wa-tooltip-border-color);
+}
+
+.tooltip-body {
+  display: block;
+  width: max-content;
+  max-width: var(--max-width);
+  padding: 0.25em 0.5em;
+  border-color: var(--wa-tooltip-border-color);
+  border-radius: var(--wa-tooltip-border-radius);
+  border-style: var(--wa-tooltip-border-style);
+  border-width: var(--wa-tooltip-border-width);
+  background-color: var(--wa-tooltip-background-color);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Transform origins follow the resolved placement */
+.tooltip > .popup[data-current-placement^='top'] > .popup-body {
+  transform-origin: bottom;
+}
+
+.tooltip > .popup[data-current-placement^='bottom'] > .popup-body {
+  transform-origin: top;
+}
+
+.tooltip > .popup[data-current-placement^='left'] > .popup-body {
+  transform-origin: right;
+}
+
+.tooltip > .popup[data-current-placement^='right'] > .popup-body {
+  transform-origin: left;
+}

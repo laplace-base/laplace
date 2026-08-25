@@ -1,0 +1,22 @@
+/* anchor headings  */
+.anchor-head a {
+  opacity: 0;
+  visibility: hidden;
+  text-decoration: none;
+  transition: opacity var(--wa-transition-normal) var(--wa-transition-easing);
+}
+
+@media (hover: hover) {
+  .anchor-head:hover a {
+    opacity: 1;
+    visibility: visible;
+    padding: var(--wa-space-3xs);
+  }
+}
+
+@media print {
+  /* show URLs for printed links */
+  a:not(.anchor-head)[href]::after {
+    content: ' (' attr(href) ')';
+  }
+}
