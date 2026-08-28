@@ -32,3 +32,6 @@ tauri-plugin-opener = { workspace = true }
 tauri-plugin-shell = { workspace = true }
 wasmtime = { workspace = true }
 wasmtime-wasi = { workspace = true }
+
+[target.'cfg(target_os = "android")'.dependencies]
+android_logger = { workspace = true }

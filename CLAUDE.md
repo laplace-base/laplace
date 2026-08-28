@@ -29,6 +29,7 @@ lapp's `by-client-handler.handle`. The Tauri window *label* is the lapp name —
 | `examples/echo/{back,front}` | `echo-back`, `echo-front` | Reference lapp |
 | `wit/http.wit` | — | The WIT world every lapp back implements |
 | `webassets/vendor` | — | Vendored htmx + wingy CSS, deployed as the `vendor` "app" |
+| `crates/app/gen/android` | — | Generated-but-committed Android Studio project (`cargo tauri android init`) |
 | `lapps/` | — | **Build output** (gitignored): `lapps/back/<name>/<name>-back.wasm`, `lapps/front/<name>/` |
 
 `crates/app` builds both a lib (`laplace_app_lib`) and a bin; `main.rs` only parses CLI args,
@@ -50,6 +51,8 @@ cargo make start     # run the already-built binary
 cargo make watch     # rebuild the front on change
 cargo make lint      # nightly fmt --check + clippy -D warnings
 cargo make test
+
+cargo make android   # build + sign + install + launch the APK on a connected device
 ```
 
 Add `-p debug` for debug profiles: `cargo make -p debug run`. Without it everything builds
@@ -65,6 +68,28 @@ The pipeline per app (`APP_NAME`) is: `build-front` → `wasm-bindgen` into `tar
 Backs go `cargo component build` → copy to `lapps/back/<APP_NAME>/<APP_NAME>-back.wasm`.
 
 CI (`.github/workflows/ci.yml`) runs only `cargo make lint` and `cargo make test`.
+
+## Android
+
+`cargo tauri android` additionally needs `ANDROID_HOME`, `NDK_HOME` (pointing at an **installed** NDK
+version) and `JAVA_HOME`; `zipalign`/`apksigner` come from the SDK build-tools. The `android-*` tasks
+in `Makefile.toml` wrap init / build / keystore / sign / install / start / logcat; `cargo make
+android` chains them, and `-p debug` switches to a debuggable APK signed with the debug key (the
+signing task then skips itself).
+
+A mobile package has no filesystem to read lapps from, so `run_mobile` in `crates/app/src/lib.rs`
+takes a different path than `run`:
+
+- frontends come from the assets embedded by `tauri::generate_context!` — `set_assets` is *not*
+  called, so `FsStoredAssets` is desktop-only;
+- backends come from `laplace_app_lib::bundled_lapps::LAPPS`, a table of `include_bytes!` entries
+  that `crates/app/build.rs` generates from `lapps/back/` for `android`/`ios` targets (empty
+  elsewhere), loaded through `LappState::from_binary`;
+- there is no `Laplace.toml`: settings are `LaplaceSettings::default()`, so `log.spec` is `info`.
+
+Because of this, `lapps/front/` and `lapps/back/` must be populated *before* the APK is built — the
+`android-build` task depends on the `lapps` task for that. Logs go to logcat under the `Laplace` tag
+(`android_logger`, initialized in `logging::init_mobile`).
 
 ## Configuration
 

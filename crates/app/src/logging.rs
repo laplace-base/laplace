@@ -57,3 +57,23 @@ fn custom_colored_detailed_format(
         style(level).paint(record.args().to_string()),
     )
 }
+
+/// Initializes logging on mobile, where stdout is discarded by the OS.
+///
+/// On Android the records go to logcat under the `Laplace` tag (`adb logcat -s Laplace`), filtered
+/// by the same spec as on desktop. On iOS stdout is already redirected to the system log by
+/// `tauri::log_stdout`, so the desktop logger is used as is.
+#[cfg(mobile)]
+pub fn init_mobile(settings: &LoggerSettings) {
+    #[cfg(target_os = "android")]
+    android_logger::init_once(
+        android_logger::Config::default()
+            .with_tag("Laplace")
+            .with_filter(android_logger::FilterBuilder::new().parse(&settings.spec).build()),
+    );
+
+    #[cfg(not(target_os = "android"))]
+    if let Err(err) = init(settings) {
+        eprintln!("Logger should be initialized: {err}");
+    }
+}

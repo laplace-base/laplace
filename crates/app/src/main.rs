@@ -11,5 +11,5 @@ fn main() {
     let settings = LaplaceSettings::new(&opts.config).expect("Settings should be configured");
 
     laplace_app_lib::logging::init(&settings.log).expect("Logger should be initialized");
-    laplace_app_lib::run(settings);
+    laplace_app_lib::run_desktop(settings);
 }

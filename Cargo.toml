@@ -24,6 +24,7 @@ panic = "abort"
 strip = "debuginfo"
 
 [workspace.dependencies]
+android_logger = { version = "0.15", default-features = false }
 anyhow = "1.0"
 ban = "3.9"
 clap = { version = "4.6", features = ["derive"] }
