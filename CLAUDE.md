@@ -29,11 +29,11 @@ lapp's `by-client-handler.handle`. The Tauri window *label* is the lapp name —
 | `examples/echo/{back,front}` | `echo-back`, `echo-front` | Reference lapp |
 | `wit/http.wit` | — | The WIT world every lapp back implements |
 | `webassets/vendor` | — | Vendored htmx + wingy CSS, deployed as the `vendor` "app" |
-| `crates/app/gen/android` | — | Generated-but-committed Android Studio project (`cargo tauri android init`) |
+| `crates/app/gen/android` | — | Generated-but-committed Android Studio project (`cargo tauri android init`); `app/src/main/assets/data/` is what the app unpacks at startup |
 | `lapps/` | — | **Build output** (gitignored): `lapps/back/<name>/<name>-back.wasm`, `lapps/front/<name>/` |
 
 `crates/app` builds both a lib (`laplace_app_lib`) and a bin; `main.rs` only parses CLI args,
-loads settings and logging, then calls `laplace_app_lib::run`.
+loads settings and logging, then calls `laplace_app_lib::run_desktop`.
 
 ## Building and running
 
@@ -77,23 +77,37 @@ in `Makefile.toml` wrap init / build / keystore / sign / install / start / logca
 android` chains them, and `-p debug` switches to a debuggable APK signed with the debug key (the
 signing task then skips itself).
 
-A mobile package has no filesystem to read lapps from, so `run_mobile` in `crates/app/src/lib.rs`
-takes a different path than `run`:
+A mobile package has no filesystem to read lapps from, so everything the desktop app reads next to
+the binary is shipped inside the APK as Android assets and unpacked at startup:
 
-- frontends come from the assets embedded by `tauri::generate_context!` — `set_assets` is *not*
-  called, so `FsStoredAssets` is desktop-only;
-- backends come from `laplace_app_lib::bundled_lapps::LAPPS`, a table of `include_bytes!` entries
-  that `crates/app/build.rs` generates from `lapps/back/` for `android`/`ios` targets (empty
-  elsewhere), loaded through `LappState::from_binary`;
-- there is no `Laplace.toml`: settings are `LaplaceSettings::default()`, so `log.spec` is `info`.
+- the `android-assets` task stages `lapps/front/` and `lapps/back/` into
+  `crates/app/gen/android/app/src/main/assets/data/` (gitignored) next to the committed
+  `data/Laplace.toml` — the platform config of the package;
+- `run_mobile` (`crates/app/src/lib.rs`) calls `android::unpack_data_assets`
+  (`crates/app/src/android.rs`), which copies the `data` assets through JNI into the app-specific
+  external storage — `/sdcard/Android/data/org.laplace/files/data` — overwriting existing files and
+  deleting nothing, so what a lapp writes next to its own files survives an update;
+- from there on the mobile path is the desktop one: `Laplace.toml` is read from the unpacked
+  directory and its relative paths are joined with it, the backends are loaded by
+  `LappsManager::load_lapps` and the frontends are served by `FsStoredAssets`.
 
-Because of this, `lapps/front/` and `lapps/back/` must be populated *before* the APK is built — the
-`android-build` task depends on the `lapps` task for that. Logs go to logcat under the `Laplace` tag
-(`android_logger`, initialized in `logging::init_mobile`).
+`android.rs` reaches the `AssetManager` through the activity `tao` registers
+(`tao::platform::android::prelude::main_android_context`, re-exported by `tauri::tao`); the mobile
+entry point runs on a thread spawned *before* that registration, hence the wait loop. `jni` is
+pinned to the version `tao` links so that only one copy of it ends up in the binary.
+
+Because of this, `lapps/front/` and `lapps/back/` must be built *before* the APK — the
+`android-build` and `android-dev` tasks depend on `android-assets` for that. Logs go to logcat under
+the `Laplace` tag (`android_logger`, initialized in `logging::init_mobile`); everything that happens
+before the unpacked settings are read — the unpacking itself included — can only be seen under the
+`RustStdoutStderr` tag, into which `tao` redirects stdout and stderr.
+
+Only Android is wired up: `run_mobile` is `#[cfg(target_os = "android")]`, and an iOS package would
+need its own way to unpack the bundle.
 
 ## Configuration
 
-- `Laplace.toml` (platform config, **gitignored** — it is a local file, not a template):
+- `Laplace.toml` in the repo root (platform config, **gitignored** — it is a local file, not a template):
   `platform.lang`, `platform.frontend_assets_root` (defaults to `lapps/front`),
   `log.spec`, `lapps.path`, `lapps.allowed`. Path is overridable with `-c/--config`.
   Env overrides use the `LAPLACE_` prefix, e.g. `LAPLACE_PLATFORM_LANG=ru`.
@@ -102,9 +116,11 @@ Because of this, `lapps/front/` and `lapps/back/` must be populated *before* the
   Note: this manifest is defined in `crates/settings` but is **not yet read** by the host —
   `LappsManager::load_lapps` currently just scans `lapps.path` for directories.
 - `crates/app/Tauri.toml` — Tauri config. It is **compiled into the binary** by
-  `tauri::generate_context!()`, so changing it requires a rebuild of `laplace-app`.
-  Assets are *not* embedded: `run()` replaces them with `FsStoredAssets`, which reads from
-  `platform.frontend_assets_root` at runtime.
+  `tauri::generate_context!()`, so changing it requires a rebuild of `laplace-app`. The assets it
+  embeds from `frontend-dist` are never used: both `run_desktop` and `run_mobile` replace them with
+  `FsStoredAssets`, which reads from `platform.frontend_assets_root` at runtime.
+- `crates/app/gen/android/app/src/main/assets/data/Laplace.toml` — the same platform config for the
+  Android package, with paths relative to the directory the assets are unpacked into.
 
 ## Frontend conventions
 
@@ -137,6 +153,9 @@ branches in the workspace `Cargo.toml`.
   structure, and the fact that the `app://` URI-scheme handler in `crates/app/src/lib.rs` is dead
   code (no window uses that scheme; it also reads paths from the filesystem root). Do not treat
   it as a working asset path.
+- The lapp frontends are packed into the APK twice: `tauri::generate_context!` embeds
+  `frontend-dist` (`lapps/front/`) into the binary even though `FsStoredAssets` always replaces it,
+  and `android-assets` ships the same files as package assets.
 - `crates/front/src/lapps.rs::list()` returns a hardcoded single `echo` entry; there is no
   command yet to enumerate real lapps from the host.
 - `handle_http` and `LappState::new` use `expect`/panic liberally — a missing or broken lapp

@@ -1,0 +1,9 @@
+[platform]
+lang = "en"
+frontend_assets_root = "lapps/front"
+
+[log]
+spec = "info"
+
+[lapps]
+path = "lapps/back"

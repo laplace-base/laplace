@@ -12,6 +12,7 @@ BACK_OUTPUT_DIR = "lapps/back"
 FRONT_OUTPUT_DIR = "lapps/front"
 ANDROID_PACKAGE = "org.laplace"
 ANDROID_PROJECT_DIR = "crates/app/gen/android"
+ANDROID_ASSETS_DIR = "${ANDROID_PROJECT_DIR}/app/src/main/assets/data"
 # NOTE: `web_sys_unstable_apis` cfg enables the Web Animations bindings in web-sys used by `wingy-hypertext-web`.
 RUSTFLAGS = "--cfg=web_sys_unstable_apis"
 
@@ -198,11 +199,21 @@ APK_OUT_DIR = "${ANDROID_PROJECT_DIR}/app/build/outputs/apk/universal/${PROFILE_
     [tasks.choose-profile-android.env.debug]
     ANDROID_SIGN = false
 
+[tasks.android-assets]
+description = "Stage the built lapps into the package assets, from where the app unpacks them at startup"
+script_runner = "@duckscript"
+script = '''
+rm -r ${ANDROID_ASSETS_DIR}/lapps
+glob_cp ${FRONT_OUTPUT_DIR}/**/* ${ANDROID_ASSETS_DIR}/lapps/front/
+glob_cp ${BACK_OUTPUT_DIR}/**/* ${ANDROID_ASSETS_DIR}/lapps/back/
+'''
+dependencies = ["lapps"]
+
 [tasks.android-build]
 description = "Build a universal APK (all ABIs)"
 command = "cargo"
 args = ["tauri", "android", "build", "--apk", "@@remove-empty(DEBUG_FLAG)"]
-dependencies = ["choose-profile-android", "lapps"]
+dependencies = ["choose-profile-android", "android-assets"]
 
 [tasks.android-keystore]
 description = "Generate the release keystore (interactive; asks for the passwords and the certificate fields)"
@@ -249,7 +260,7 @@ args = ["logcat", "-s", "Laplace:V", "RustStdoutStderr:V"]
 description = "Build, install and run a debug build on a connected device with its log attached"
 command = "cargo"
 args = ["tauri", "android", "dev"]
-dependencies = ["lapps"]
+dependencies = ["android-assets"]
 
 [tasks.android-install]
 description = "Install the built APK on the connected device or emulator"

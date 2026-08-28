@@ -14,16 +14,12 @@ use crate::api::http::{Http, Request, Response};
 use crate::assets::FsStoredAssets;
 use crate::wasi::WasiStates;
 
+#[cfg(target_os = "android")]
+pub mod android;
 pub mod api;
 pub mod assets;
 pub mod logging;
 pub mod wasi;
-
-/// The lapp backends embedded into the binary by `build.rs`. Empty on desktop targets.
-#[cfg(mobile)]
-pub mod bundled_lapps {
-    include!(concat!(env!("OUT_DIR"), "/bundled_lapps.rs"));
-}
 
 #[derive(Default)]
 pub struct LappsManager {
@@ -62,21 +58,6 @@ impl LappsManager {
 
         Ok(lapps)
     }
-
-    /// Loads the lapps embedded into the binary at build time.
-    ///
-    /// Used on mobile, where there is no lapps directory to scan next to the binary.
-    pub fn load_bundled_lapps(&self, bundled: &[(&str, &[u8])]) -> anyhow::Result<Lapps> {
-        bundled
-            .iter()
-            .map(|(name, component)| {
-                Ok((
-                    name.to_string(),
-                    LappState::from_binary(&self.engine, *name, component)?,
-                ))
-            })
-            .collect()
-    }
 }
 
 #[allow(dead_code)]
@@ -93,15 +74,6 @@ impl LappState {
         let path = root_path.as_ref().join(format!("{name}-back.wasm"));
         let component = Component::from_file(engine, &path)
             .with_context(|| format!("Component file '{}' not found", path.display()))?;
-
-        Self::new(engine, name, component)
-    }
-
-    /// Loads a component from bytes embedded into the binary.
-    pub fn from_binary(engine: &Engine, name: impl Into<String>, component: &[u8]) -> anyhow::Result<Self> {
-        let name = name.into();
-        let component = Component::from_binary(engine, component)
-            .with_context(|| format!("Invalid bundled component of the lapp '{name}'"))?;
 
         Self::new(engine, name, component)
     }
@@ -146,38 +118,52 @@ pub fn run_desktop(settings: LaplaceSettings) {
     start(
         settings.platform.lang,
         lapps,
-        Some(Box::new(FsStoredAssets::new(settings.platform.frontend_assets_root))),
+        Box::new(FsStoredAssets::new(settings.platform.frontend_assets_root)),
     )
 }
 
-/// Mobile entry point called by the generated Android/iOS projects.
+/// Mobile entry point called by the generated Android project.
 ///
-/// A mobile package has no CLI, no `Laplace.toml` next to the binary and no writable lapps
-/// directory, so everything is taken from the package itself: the frontend from the assets embedded
-/// by [`tauri::generate_context`] and the lapp backends from [`bundled_lapps`].
-#[cfg(mobile)]
+/// A mobile package has no CLI and nothing readable as files next to the binary: `Laplace.toml`,
+/// the lapp frontends and the lapp backends are shipped as package assets and unpacked into the
+/// app-specific external storage by [`android::unpack_data_assets`]. Everything the settings point
+/// at is therefore relative to the directory they were unpacked into.
+#[cfg(target_os = "android")]
 #[tauri::mobile_entry_point]
 pub fn run_mobile() {
-    let settings = LaplaceSettings::default();
+    // Logging is set up from the unpacked settings, so until then failures are only reported by
+    // the panic itself, which `tao` forwards to logcat under the `RustStdoutStderr` tag.
+    let unpacked = android::unpack_data_assets().expect("Failed to unpack the data assets");
+
+    let config_path = unpacked.path.join("Laplace.toml");
+    let mut settings = LaplaceSettings::new(&config_path).expect("Settings should be configured");
+    settings.platform.frontend_assets_root = unpacked.path.join(&settings.platform.frontend_assets_root);
+    settings.lapps.path = unpacked.path.join(&settings.lapps.path);
+
     logging::init_mobile(&settings.log);
+    log::info!(
+        "Run mobile: unpacked {} files ({} bytes) into '{}'",
+        unpacked.files,
+        unpacked.bytes,
+        unpacked.path.display(),
+    );
 
-    log::info!("Run mobile");
     let manager = LappsManager::new();
-    let lapps = manager
-        .load_bundled_lapps(bundled_lapps::LAPPS)
-        .expect("Failed load bundled lapps");
+    let lapps = manager.load_lapps(settings.lapps).expect("Failed load lapps");
 
-    start(settings.platform.lang, lapps, None)
+    start(
+        settings.platform.lang,
+        lapps,
+        Box::new(FsStoredAssets::new(settings.platform.frontend_assets_root)),
+    )
 }
 
 /// Builds and runs the Tauri application.
 ///
-/// `assets` replaces the assets embedded at compile time; passing [`None`] keeps the embedded ones.
-fn start(lang: String, lapps: Lapps, assets: Option<Box<dyn Assets<Wry>>>) {
+/// `assets` replaces the assets embedded at compile time by [`tauri::generate_context`].
+fn start(lang: String, lapps: Lapps, assets: Box<dyn Assets<Wry>>) {
     let mut context = tauri::generate_context!();
-    if let Some(assets) = assets {
-        context.set_assets(assets);
-    }
+    context.set_assets(assets);
 
     tauri::Builder::default()
         .manage(State {

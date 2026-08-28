@@ -35,3 +35,4 @@ wasmtime-wasi = { workspace = true }
 
 [target.'cfg(target_os = "android")'.dependencies]
 android_logger = { workspace = true }
+jni = { workspace = true }

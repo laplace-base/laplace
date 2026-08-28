@@ -66,11 +66,17 @@ fn custom_colored_detailed_format(
 #[cfg(mobile)]
 pub fn init_mobile(settings: &LoggerSettings) {
     #[cfg(target_os = "android")]
-    android_logger::init_once(
-        android_logger::Config::default()
-            .with_tag("Laplace")
-            .with_filter(android_logger::FilterBuilder::new().parse(&settings.spec).build()),
-    );
+    {
+        let filter = android_logger::FilterBuilder::new().parse(&settings.spec).build();
+        android_logger::init_once(
+            android_logger::Config::default()
+                .with_tag("Laplace")
+                // `init_once` leaves the global max level of the `log` crate at `Off` unless it is
+                // given one, and the `log` macros check it before the filter ever sees a record.
+                .with_max_level(filter.filter())
+                .with_filter(filter),
+        );
+    }
 
     #[cfg(not(target_os = "android"))]
     if let Err(err) = init(settings) {

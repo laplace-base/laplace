@@ -37,6 +37,7 @@ http-serde = "2.1"
 hypertext = { git = "https://github.com/XX/hypertext", branch = "dev", features = ["axum", "htmx"] }
 icondata = "0.7"
 iconic = { git = "https://github.com/XX/iconic", features = ["hypertext", "fontawesome", "fontawesome-ext"] }
+jni = "0.21" # NOTE: `tao` links jni 0.21, so the same version keeps a single copy of it in the binary.
 js-sys = "0.3"
 laplace-common-api = { path = "crates/common-api" }
 laplace-front-api = { path = "crates/front-api" }

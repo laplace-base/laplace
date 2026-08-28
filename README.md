@@ -67,6 +67,7 @@ cargo make android-log          # follow the app log from the device
 
 | Task | What it does |
 | --- | --- |
+| `android-assets` | stages the built lapps into the package assets; `android-build` and `android-dev` depend on it |
 | `android-build` | `cargo tauri android build --apk` for all four ABIs |
 | `android-keystore` | `keytool -genkeypair` into `android-release-key.jks` (skipped if it exists, and for `-p debug`) |
 | `android-sign` | `zipalign` + `apksigner sign` of the release APK (skipped for `-p debug`) |
@@ -84,7 +85,22 @@ ANDROID_KEY_PASS=…
 
 Debug and release APKs are signed with different keys, so switching between them on the same device
 needs an `adb uninstall org.laplace` in between. The app logs to logcat under the `Laplace` tag —
-that is what `cargo make android-log` follows.
+that is what `cargo make android-log` follows; the startup that precedes the log setup, unpacking
+the assets included, shows up there under `RustStdoutStderr`.
+
+An APK has no directory to read the lapps from, so `Laplace.toml`, `lapps/front/` and `lapps/back/`
+are packed into it as assets (`android-assets` stages them into
+`crates/app/gen/android/app/src/main/assets/data/`) and unpacked on every start into the
+app-specific external storage:
+
+```sh
+adb shell ls /sdcard/Android/data/org.laplace/files/data
+```
+
+Existing files are overwritten and nothing is deleted, so a lapp keeps whatever it has written
+there. The config of the package is the committed
+`crates/app/gen/android/app/src/main/assets/data/Laplace.toml`; all the paths in it are relative to
+the unpacked directory.
 
 APKs are written to `crates/app/gen/android/app/build/outputs/apk/universal/{release,debug}/`.
 `crates/app/gen/android` is generated, but committed: edit it when the app needs Android-specific

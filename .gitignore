@@ -8,7 +8,7 @@ key.properties
 keystore.properties
 
 .env
-Laplace.toml
+/Laplace.toml
 lapps/
 NOTES.*
 tmp/

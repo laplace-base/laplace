@@ -2769,6 +2769,7 @@ dependencies = [
  "anyhow",
  "clap",
  "flexi_logger",
+ "jni",
  "laplace-common-api",
  "laplace-settings",
  "log",
