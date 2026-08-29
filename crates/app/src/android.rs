@@ -7,9 +7,12 @@
 //! package is uninstalled.
 //!
 //! The directory is filled from the `data` assets of the APK (see the `android-assets` task in
-//! `Makefile.toml`). A file missing from it is always unpacked; an existing one is overwritten only
-//! when the package itself has changed since the last unpacking, and the settings file is left
-//! alone entirely — once it is there, it belongs to the user.
+//! `Makefile.toml`), and only on the first start of a newly installed or updated package: a file
+//! that is missing is written, and one that is already there is replaced only if
+//! `platform.mobile.overwrite_existing_assets` allows it. Every other start unpacks nothing and
+//! runs on what is in the data directory, so a file the user has deleted does not come back and a
+//! file they have changed stays changed. The settings file is the single exception: it is put back
+//! whenever it is missing, because nothing can start without it, and it is never replaced.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -19,6 +22,7 @@ use std::{fs, io, thread};
 use anyhow::{Context as _, bail};
 use jni::objects::{JObject, JObjectArray, JString, JValue};
 use jni::{JNIEnv, JavaVM};
+use laplace_settings::LaplaceSettings;
 use tauri::tao::platform::android::prelude::{AndroidContext, main_android_context};
 
 /// The settings file, read by the host and editable by the user.
@@ -100,8 +104,8 @@ pub fn prepare_data_dir() -> anyhow::Result<DataDir> {
     };
 
     let stamp = package_stamp(&mut env, &activity)?;
-    // A file the user has changed is kept until the package itself changes.
-    let refresh = read_stamp(&path) != Some(stamp);
+    // The one start that unpacks anything: from here on the data directory is the user's.
+    let package_changed = read_stamp(&path) != Some(stamp);
 
     let assets = env
         .call_method(&activity, "getAssets", "()Landroid/content/res/AssetManager;", &[])
@@ -109,9 +113,21 @@ pub fn prepare_data_dir() -> anyhow::Result<DataDir> {
         .l()?;
 
     let mut unpacked = Unpacked::default();
-    unpack_asset_dir(&mut env, &assets, DATA_ASSET_DIR, &path, refresh, &mut unpacked)?;
+    // The settings say how the rest of the data is to be unpacked, so they come first — and they
+    // are the one file the app cannot start without, so they are restored whenever they are gone.
+    let settings = unpack_settings(&mut env, &assets, &path, &mut unpacked).unwrap_or_else(|err| {
+        warnings.push(format!(
+            "Failed to read the settings of the data directory: {err:#}. The unpacking falls back to \
+             its defaults."
+        ));
+        LaplaceSettings::default()
+    });
 
-    if refresh {
+    // An ordinary start unpacks nothing at all: whatever the user has deleted stays deleted, and
+    // whatever they have changed stays changed, until the package itself is installed anew.
+    if package_changed {
+        let overwrite = settings.platform.mobile.overwrite_existing_assets;
+        unpack_asset_dir(&mut env, &assets, DATA_ASSET_DIR, &path, overwrite, &mut unpacked)?;
         write_stamp(&path, stamp)?;
     }
 
@@ -300,16 +316,55 @@ struct Unpacked {
     paths: Vec<String>,
 }
 
+/// Puts the settings file in place, if it is not there yet, and reads it.
+///
+/// It is what the unpacking of everything else is governed by, so it cannot wait for its turn in
+/// [`unpack_asset_dir`] — and on the very first start it exists as a package asset only. Unlike
+/// everything else it is restored on any start, not just the one after an installation: the app
+/// has nothing to read its settings from otherwise.
+fn unpack_settings(
+    env: &mut JNIEnv,
+    assets: &JObject,
+    target_dir: &Path,
+    unpacked: &mut Unpacked,
+) -> anyhow::Result<LaplaceSettings> {
+    let target_path = target_dir.join(CONFIG_FILE_NAME);
+    let asset_path = format!("{DATA_ASSET_DIR}/{CONFIG_FILE_NAME}");
+
+    if !target_path.exists() {
+        if !list_assets(env, assets, DATA_ASSET_DIR)?
+            .iter()
+            .any(|entry| entry == CONFIG_FILE_NAME)
+        {
+            bail!(
+                "Neither '{}' nor the asset '{asset_path}' exists",
+                target_path.display()
+            );
+        }
+
+        fs::create_dir_all(target_dir)
+            .with_context(|| format!("Failed to create directory '{}'", target_dir.display()))?;
+
+        unpacked.bytes += copy_asset_file(env, assets, &asset_path, &target_path)?;
+        unpacked.files += 1;
+        unpacked.paths.push(target_path.to_string_lossy().into_owned());
+    }
+
+    LaplaceSettings::new(&target_path).with_context(|| format!("Failed to read file '{}'", target_path.display()))
+}
+
 /// Unpacks the contents of the `asset_dir` assets subtree into `target_dir`.
 ///
-/// A file that is not there yet is always written; an existing one is replaced only when `refresh`
-/// is set, and the settings file is never replaced at all.
+/// Called on the first start of a newly installed or updated package alone. A file that is not
+/// there yet is written; an existing one is replaced only when `overwrite` is set. The settings
+/// file is never replaced at all — [`unpack_settings`] has already put it there and from then on
+/// it belongs to the user.
 fn unpack_asset_dir(
     env: &mut JNIEnv,
     assets: &JObject,
     asset_dir: &str,
     target_dir: &Path,
-    refresh: bool,
+    overwrite: bool,
     unpacked: &mut Unpacked,
 ) -> anyhow::Result<()> {
     fs::create_dir_all(target_dir).with_context(|| format!("Failed to create directory '{}'", target_dir.display()))?;
@@ -321,11 +376,11 @@ fn unpack_asset_dir(
         // `AssetManager` has no way to tell a file from a directory: `list` returns no entries for
         // anything that is not a directory, and directories without files are not packed at all.
         if !list_assets(env, assets, &asset_path)?.is_empty() {
-            unpack_asset_dir(env, assets, &asset_path, &target_path, refresh, unpacked)?;
+            unpack_asset_dir(env, assets, &asset_path, &target_path, overwrite, unpacked)?;
             continue;
         }
 
-        if target_path.exists() && (!refresh || entry == CONFIG_FILE_NAME) {
+        if target_path.exists() && (!overwrite || entry == CONFIG_FILE_NAME) {
             continue;
         }
 

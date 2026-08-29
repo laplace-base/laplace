@@ -96,10 +96,15 @@ the binary is shipped inside the APK as Android assets and unpacked at startup:
   and its relative paths are joined with it, the backends are loaded by `LappsManager::load_lapps`
   and the frontends are served by `FsStoredAssets`.
 
-Unpacking never destroys what is in the data directory, because the user owns it: a file that is
-missing is always written, an existing one is replaced only when the package has been installed or
-updated since the last unpacking (`PackageInfo.lastUpdateTime`, remembered in `.unpacked`), and
-`Laplace.toml` is never replaced once it is there. Everything the user has added is left alone.
+Unpacking never destroys what is in the data directory, because the user owns it. It happens on the
+first start after the package has been installed or updated and then never again
+(`PackageInfo.lastUpdateTime`, remembered in `.unpacked`): a missing file is written, an existing one
+is replaced only if `platform.mobile.overwrite_existing_assets` is set, and nothing is deleted. Every
+other start unpacks nothing whatsoever and runs on what is in the directory, so a file the user has
+deleted does not come back and their edits and their own lapps are left alone. `Laplace.toml` is the
+exception on both counts: it is put back whenever it is missing, since nothing can start without it,
+and it is never replaced. It also governs the unpacking, so `android::unpack_settings` restores and
+reads it before the rest of the data is written.
 
 The storage permissions live in `crates/app/gen/android/app/src/main/AndroidManifest.xml`:
 `MANAGE_EXTERNAL_STORAGE` for Android 11+, `READ_EXTERNAL_STORAGE` / `WRITE_EXTERNAL_STORAGE` plus
@@ -139,7 +144,10 @@ need its own way to unpack the bundle.
 - `crates/app/gen/android/app/src/main/assets/data/Laplace.toml` — the same platform config for the
   Android package, with paths relative to the data directory. It is unpacked once and never
   overwritten afterwards, so on a device the file the app reads is
-  `Documents/Laplace/Laplace.toml`, which the user may edit.
+  `Documents/Laplace/Laplace.toml`, which the user may edit. Its `platform.mobile` section is read
+  on mobile only: `overwrite_existing_assets` (default `true`) lets the unpacking after an
+  installation or update replace the data directory files that are already there; turned off, it
+  only writes the ones missing from it.
 
 ## Frontend conventions
 
