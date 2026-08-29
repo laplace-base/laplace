@@ -125,28 +125,31 @@ pub fn run_desktop(settings: LaplaceSettings) {
 /// Mobile entry point called by the generated Android project.
 ///
 /// A mobile package has no CLI and nothing readable as files next to the binary: `Laplace.toml`,
-/// the lapp frontends and the lapp backends are shipped as package assets and unpacked into the
-/// app-specific external storage by [`android::unpack_data_assets`]. Everything the settings point
-/// at is therefore relative to the directory they were unpacked into.
+/// the lapp frontends and the lapp backends live in the data directory that
+/// [`android::prepare_data_dir`] picks and fills from the package assets. Everything the settings
+/// point at is therefore relative to that directory.
 #[cfg(target_os = "android")]
 #[tauri::mobile_entry_point]
 pub fn run_mobile() {
-    // Logging is set up from the unpacked settings, so until then failures are only reported by
-    // the panic itself, which `tao` forwards to logcat under the `RustStdoutStderr` tag.
-    let unpacked = android::unpack_data_assets().expect("Failed to unpack the data assets");
+    // Logging is set up from the settings in the data directory, so until then failures are only
+    // reported by the panic itself, which `tao` forwards to logcat under the `RustStdoutStderr` tag.
+    let data = android::prepare_data_dir().expect("Failed to prepare the data directory");
 
-    let config_path = unpacked.path.join("Laplace.toml");
-    let mut settings = LaplaceSettings::new(&config_path).expect("Settings should be configured");
-    settings.platform.frontend_assets_root = unpacked.path.join(&settings.platform.frontend_assets_root);
-    settings.lapps.path = unpacked.path.join(&settings.lapps.path);
+    let mut settings = LaplaceSettings::new(data.config_path()).expect("Settings should be configured");
+    settings.platform.frontend_assets_root = data.path.join(&settings.platform.frontend_assets_root);
+    settings.lapps.path = data.path.join(&settings.lapps.path);
 
     logging::init_mobile(&settings.log);
     log::info!(
-        "Run mobile: unpacked {} files ({} bytes) into '{}'",
-        unpacked.files,
-        unpacked.bytes,
-        unpacked.path.display(),
+        "Run mobile: {} data directory '{}', unpacked {} files ({} bytes)",
+        if data.shared { "shared" } else { "sandbox" },
+        data.path.display(),
+        data.unpacked_files,
+        data.unpacked_bytes,
     );
+    for warning in &data.warnings {
+        log::warn!("{warning}");
+    }
 
     let manager = LappsManager::new();
     let lapps = manager.load_lapps(settings.lapps).expect("Failed load lapps");

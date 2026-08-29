@@ -90,17 +90,29 @@ the assets included, shows up there under `RustStdoutStderr`.
 
 An APK has no directory to read the lapps from, so `Laplace.toml`, `lapps/front/` and `lapps/back/`
 are packed into it as assets (`android-assets` stages them into
-`crates/app/gen/android/app/src/main/assets/data/`) and unpacked on every start into the
-app-specific external storage:
+`crates/app/gen/android/app/src/main/assets/data/`) and unpacked at startup into
+`Documents/Laplace` on the shared storage:
 
 ```sh
-adb shell ls /sdcard/Android/data/org.laplace/files/data
+adb shell ls /sdcard/Documents/Laplace
 ```
 
-Existing files are overwritten and nothing is deleted, so a lapp keeps whatever it has written
-there. The config of the package is the committed
+That directory is deliberately outside the app sandbox: it survives an uninstall, is writable from
+a file manager and shows up over MTP, which is how lapps get added to the device. Reaching it needs
+the all-files access, which only the user can grant — the app opens the settings screen for it on a
+start that has no access and uses `/sdcard/Android/data/org.laplace/files/data` until then. From a
+shell the access is granted with:
+
+```sh
+adb shell appops set --uid org.laplace MANAGE_EXTERNAL_STORAGE allow
+```
+
+Unpacking does not destroy anything in the data directory: missing files are written, existing ones
+are refreshed only when the package has been reinstalled or updated, `Laplace.toml` is written once
+and then belongs to the user, and files the user has added are never touched. The version in the
+repository — the one the first start unpacks — is
 `crates/app/gen/android/app/src/main/assets/data/Laplace.toml`; all the paths in it are relative to
-the unpacked directory.
+the data directory.
 
 APKs are written to `crates/app/gen/android/app/build/outputs/apk/universal/{release,debug}/`.
 `crates/app/gen/android` is generated, but committed: edit it when the app needs Android-specific

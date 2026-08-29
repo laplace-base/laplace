@@ -83,13 +83,30 @@ the binary is shipped inside the APK as Android assets and unpacked at startup:
 - the `android-assets` task stages `lapps/front/` and `lapps/back/` into
   `crates/app/gen/android/app/src/main/assets/data/` (gitignored) next to the committed
   `data/Laplace.toml` — the platform config of the package;
-- `run_mobile` (`crates/app/src/lib.rs`) calls `android::unpack_data_assets`
-  (`crates/app/src/android.rs`), which copies the `data` assets through JNI into the app-specific
-  external storage — `/sdcard/Android/data/org.laplace/files/data` — overwriting existing files and
-  deleting nothing, so what a lapp writes next to its own files survives an update;
-- from there on the mobile path is the desktop one: `Laplace.toml` is read from the unpacked
-  directory and its relative paths are joined with it, the backends are loaded by
-  `LappsManager::load_lapps` and the frontends are served by `FsStoredAssets`.
+- `run_mobile` (`crates/app/src/lib.rs`) calls `android::prepare_data_dir`
+  (`crates/app/src/android.rs`), which picks the data directory and fills it from the `data` assets
+  through JNI;
+- the data directory is `Documents/Laplace` on the shared storage — it outlives the package, is
+  writable from outside and shows up over MTP (the unpacked files are handed to
+  `MediaScannerConnection`, without which `MediaStore` does not index them). Reaching it by path
+  needs the all-files access, so when the app has none it opens the settings screen that grants it
+  and falls back for that run to `/sdcard/Android/data/org.laplace/files/data`, which needs no
+  permission at all;
+- from there on the mobile path is the desktop one: `Laplace.toml` is read from the data directory
+  and its relative paths are joined with it, the backends are loaded by `LappsManager::load_lapps`
+  and the frontends are served by `FsStoredAssets`.
+
+Unpacking never destroys what is in the data directory, because the user owns it: a file that is
+missing is always written, an existing one is replaced only when the package has been installed or
+updated since the last unpacking (`PackageInfo.lastUpdateTime`, remembered in `.unpacked`), and
+`Laplace.toml` is never replaced once it is there. Everything the user has added is left alone.
+
+The storage permissions live in `crates/app/gen/android/app/src/main/AndroidManifest.xml`:
+`MANAGE_EXTERNAL_STORAGE` for Android 11+, `READ_EXTERNAL_STORAGE` / `WRITE_EXTERNAL_STORAGE` plus
+`requestLegacyExternalStorage` for the API levels below it. The all-files access is a *special*
+access: it is never granted by a request dialog, only by the user in settings, and it has to be
+re-checked on every start. Granting it from a shell is
+`adb shell appops set --uid org.laplace MANAGE_EXTERNAL_STORAGE allow`.
 
 `android.rs` reaches the `AssetManager` through the activity `tao` registers
 (`tao::platform::android::prelude::main_android_context`, re-exported by `tauri::tao`); the mobile
@@ -120,7 +137,9 @@ need its own way to unpack the bundle.
   embeds from `frontend-dist` are never used: both `run_desktop` and `run_mobile` replace them with
   `FsStoredAssets`, which reads from `platform.frontend_assets_root` at runtime.
 - `crates/app/gen/android/app/src/main/assets/data/Laplace.toml` — the same platform config for the
-  Android package, with paths relative to the directory the assets are unpacked into.
+  Android package, with paths relative to the data directory. It is unpacked once and never
+  overwritten afterwards, so on a device the file the app reads is
+  `Documents/Laplace/Laplace.toml`, which the user may edit.
 
 ## Frontend conventions
 
