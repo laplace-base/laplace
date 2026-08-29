@@ -1,11 +1,11 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Mutex;
 use std::{fs, io};
 
 use laplace_settings::LaplaceSettings;
 use laplace_settings::laplace::LappsSettings;
-use tauri::http;
+use tauri::{Assets, Wry, http};
 use wasmtime::component::{Component, Linker};
 use wasmtime::error::Context;
 use wasmtime::{Engine, Store};
@@ -14,6 +14,8 @@ use crate::api::http::{Http, Request, Response};
 use crate::assets::FsStoredAssets;
 use crate::wasi::WasiStates;
 
+#[cfg(target_os = "android")]
+pub mod android;
 pub mod api;
 pub mod assets;
 pub mod logging;
@@ -50,7 +52,7 @@ impl LappsManager {
 
             lapps.insert(
                 lapp_name.clone(),
-                LappState::new(&self.engine, entry.path(), lapp_name)?,
+                LappState::from_file(&self.engine, entry.path(), lapp_name)?,
             );
         }
 
@@ -61,18 +63,22 @@ impl LappsManager {
 #[allow(dead_code)]
 pub struct LappState {
     name: String,
-    path: PathBuf,
     store: Store<WasiStates>,
     http_instance: Http,
 }
 
 impl LappState {
-    pub fn new(engine: &Engine, root_path: impl AsRef<Path>, name: impl Into<String>) -> anyhow::Result<Self> {
+    /// Loads `<root_path>/<name>-back.wasm` from the filesystem.
+    pub fn from_file(engine: &Engine, root_path: impl AsRef<Path>, name: impl Into<String>) -> anyhow::Result<Self> {
         let name = name.into();
         let path = root_path.as_ref().join(format!("{name}-back.wasm"));
         let component = Component::from_file(engine, &path)
             .with_context(|| format!("Component file '{}' not found", path.display()))?;
 
+        Self::new(engine, name, component)
+    }
+
+    fn new(engine: &Engine, name: String, component: Component) -> anyhow::Result<Self> {
         let wasi_states = WasiStates::new();
         let mut store = Store::new(engine, wasi_states);
 
@@ -84,7 +90,6 @@ impl LappState {
 
         Ok(Self {
             name,
-            path,
             store,
             http_instance,
         })
@@ -105,17 +110,67 @@ pub struct State {
     pub lapps: Mutex<Lapps>,
 }
 
-pub fn run(settings: LaplaceSettings) {
-    println!("Run");
+pub fn run_desktop(settings: LaplaceSettings) {
+    log::info!("Run");
     let manager = LappsManager::new();
     let lapps = manager.load_lapps(settings.lapps).expect("Failed load lapps");
 
+    start(
+        settings.platform.lang,
+        lapps,
+        Box::new(FsStoredAssets::new(settings.platform.frontend_assets_root)),
+    )
+}
+
+/// Mobile entry point called by the generated Android project.
+///
+/// A mobile package has no CLI and nothing readable as files next to the binary: `Laplace.toml`,
+/// the lapp frontends and the lapp backends live in the data directory that
+/// [`android::prepare_data_dir`] picks and fills from the package assets. Everything the settings
+/// point at is therefore relative to that directory.
+#[cfg(target_os = "android")]
+#[tauri::mobile_entry_point]
+pub fn run_mobile() {
+    // Logging is set up from the settings in the data directory, so until then failures are only
+    // reported by the panic itself, which `tao` forwards to logcat under the `RustStdoutStderr` tag.
+    let data = android::prepare_data_dir().expect("Failed to prepare the data directory");
+
+    let mut settings = LaplaceSettings::new(data.config_path()).expect("Settings should be configured");
+    settings.platform.frontend_assets_root = data.path.join(&settings.platform.frontend_assets_root);
+    settings.lapps.path = data.path.join(&settings.lapps.path);
+
+    logging::init_mobile(&settings.log);
+    log::info!(
+        "Run mobile: {} data directory '{}', unpacked {} files ({} bytes)",
+        if data.shared { "shared" } else { "sandbox" },
+        data.path.display(),
+        data.unpacked_files,
+        data.unpacked_bytes,
+    );
+    for warning in &data.warnings {
+        log::warn!("{warning}");
+    }
+
+    let manager = LappsManager::new();
+    let lapps = manager.load_lapps(settings.lapps).expect("Failed load lapps");
+
+    start(
+        settings.platform.lang,
+        lapps,
+        Box::new(FsStoredAssets::new(settings.platform.frontend_assets_root)),
+    )
+}
+
+/// Builds and runs the Tauri application.
+///
+/// `assets` replaces the assets embedded at compile time by [`tauri::generate_context`].
+fn start(lang: String, lapps: Lapps, assets: Box<dyn Assets<Wry>>) {
     let mut context = tauri::generate_context!();
-    context.set_assets(Box::new(FsStoredAssets::new(settings.platform.frontend_assets_root)));
+    context.set_assets(assets);
 
     tauri::Builder::default()
         .manage(State {
-            lang: settings.platform.lang,
+            lang,
             lapps: Mutex::new(lapps),
         })
         .plugin(tauri_plugin_shell::init())

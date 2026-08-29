@@ -1,10 +1,17 @@
 **/target/
 **/*.rs.bk
-tmp/
 
-Laplace.toml
+# Android signing material
+*.jks
+*.keystore
+key.properties
+keystore.properties
+
+.env
+/Laplace.toml
 lapps/
 NOTES.*
+tmp/
 
 **/.idea
 **/*.iml

@@ -1,0 +1,12 @@
+[platform]
+lang = "en"
+frontend_assets_root = "lapps/front"
+
+[platform.mobile]
+overwrite_existing_assets = true
+
+[log]
+spec = "info"
+
+[lapps]
+path = "lapps/back"

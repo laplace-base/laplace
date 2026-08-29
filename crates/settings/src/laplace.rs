@@ -11,6 +11,7 @@ pub struct PlatformSettings {
     pub lang: String,
     #[serde(default = "default_frontend_assets_root")]
     pub frontend_assets_root: PathBuf,
+    pub mobile: MobileSettings,
 }
 
 impl Default for PlatformSettings {
@@ -18,8 +19,23 @@ impl Default for PlatformSettings {
         Self {
             lang: "en".into(),
             frontend_assets_root: default_frontend_assets_root(),
+            mobile: MobileSettings::default(),
         }
     }
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
+pub struct MobileSettings {
+    /// Whether the first start of a newly installed or updated package replaces the files of the
+    /// data directory with the packaged ones.
+    ///
+    /// It only ever applies to that first start — every later one unpacks nothing at all — and
+    /// only to the files that are there: the missing ones are written in any case. Turned off, the
+    /// packaged files never replace anything, so a data directory that has once been filled stays
+    /// as the user left it across updates. The settings file is never replaced either way.
+    #[serde(default)]
+    pub overwrite_existing_assets: bool,
 }
 
 fn default_frontend_assets_root() -> PathBuf {

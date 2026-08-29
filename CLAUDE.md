@@ -29,10 +29,11 @@ lapp's `by-client-handler.handle`. The Tauri window *label* is the lapp name —
 | `examples/echo/{back,front}` | `echo-back`, `echo-front` | Reference lapp |
 | `wit/http.wit` | — | The WIT world every lapp back implements |
 | `webassets/vendor` | — | Vendored htmx + wingy CSS, deployed as the `vendor` "app" |
+| `crates/app/gen/android` | — | Generated-but-committed Android Studio project (`cargo tauri android init`); `app/src/main/assets/data/` is what the app unpacks at startup |
 | `lapps/` | — | **Build output** (gitignored): `lapps/back/<name>/<name>-back.wasm`, `lapps/front/<name>/` |
 
 `crates/app` builds both a lib (`laplace_app_lib`) and a bin; `main.rs` only parses CLI args,
-loads settings and logging, then calls `laplace_app_lib::run`.
+loads settings and logging, then calls `laplace_app_lib::run_desktop`.
 
 ## Building and running
 
@@ -50,6 +51,8 @@ cargo make start     # run the already-built binary
 cargo make watch     # rebuild the front on change
 cargo make lint      # nightly fmt --check + clippy -D warnings
 cargo make test
+
+cargo make android   # build + sign + install + launch the APK on a connected device
 ```
 
 Add `-p debug` for debug profiles: `cargo make -p debug run`. Without it everything builds
@@ -66,9 +69,67 @@ Backs go `cargo component build` → copy to `lapps/back/<APP_NAME>/<APP_NAME>-b
 
 CI (`.github/workflows/ci.yml`) runs only `cargo make lint` and `cargo make test`.
 
+## Android
+
+`cargo tauri android` additionally needs `ANDROID_HOME`, `NDK_HOME` (pointing at an **installed** NDK
+version) and `JAVA_HOME`; `zipalign`/`apksigner` come from the SDK build-tools. The `android-*` tasks
+in `Makefile.toml` wrap init / build / keystore / sign / install / start / logcat; `cargo make
+android` chains them, and `-p debug` switches to a debuggable APK signed with the debug key (the
+signing task then skips itself).
+
+A mobile package has no filesystem to read lapps from, so everything the desktop app reads next to
+the binary is shipped inside the APK as Android assets and unpacked at startup:
+
+- the `android-assets` task stages `lapps/front/` and `lapps/back/` into
+  `crates/app/gen/android/app/src/main/assets/data/` (gitignored) next to the committed
+  `data/Laplace.toml` — the platform config of the package;
+- `run_mobile` (`crates/app/src/lib.rs`) calls `android::prepare_data_dir`
+  (`crates/app/src/android.rs`), which picks the data directory and fills it from the `data` assets
+  through JNI;
+- the data directory is `Documents/Laplace` on the shared storage — it outlives the package, is
+  writable from outside and shows up over MTP (the unpacked files are handed to
+  `MediaScannerConnection`, without which `MediaStore` does not index them). Reaching it by path
+  needs the all-files access, so when the app has none it opens the settings screen that grants it
+  and falls back for that run to `/sdcard/Android/data/org.laplace/files/data`, which needs no
+  permission at all;
+- from there on the mobile path is the desktop one: `Laplace.toml` is read from the data directory
+  and its relative paths are joined with it, the backends are loaded by `LappsManager::load_lapps`
+  and the frontends are served by `FsStoredAssets`.
+
+Unpacking never destroys what is in the data directory, because the user owns it. It happens on the
+first start after the package has been installed or updated and then never again
+(`PackageInfo.lastUpdateTime`, remembered in `.unpacked`): a missing file is written, an existing one
+is replaced only if `platform.mobile.overwrite_existing_assets` is set, and nothing is deleted. Every
+other start unpacks nothing whatsoever and runs on what is in the directory, so a file the user has
+deleted does not come back and their edits and their own lapps are left alone. `Laplace.toml` is the
+exception on both counts: it is put back whenever it is missing, since nothing can start without it,
+and it is never replaced. It also governs the unpacking, so `android::unpack_settings` restores and
+reads it before the rest of the data is written.
+
+The storage permissions live in `crates/app/gen/android/app/src/main/AndroidManifest.xml`:
+`MANAGE_EXTERNAL_STORAGE` for Android 11+, `READ_EXTERNAL_STORAGE` / `WRITE_EXTERNAL_STORAGE` plus
+`requestLegacyExternalStorage` for the API levels below it. The all-files access is a *special*
+access: it is never granted by a request dialog, only by the user in settings, and it has to be
+re-checked on every start. Granting it from a shell is
+`adb shell appops set --uid org.laplace MANAGE_EXTERNAL_STORAGE allow`.
+
+`android.rs` reaches the `AssetManager` through the activity `tao` registers
+(`tao::platform::android::prelude::main_android_context`, re-exported by `tauri::tao`); the mobile
+entry point runs on a thread spawned *before* that registration, hence the wait loop. `jni` is
+pinned to the version `tao` links so that only one copy of it ends up in the binary.
+
+Because of this, `lapps/front/` and `lapps/back/` must be built *before* the APK — the
+`android-build` and `android-dev` tasks depend on `android-assets` for that. Logs go to logcat under
+the `Laplace` tag (`android_logger`, initialized in `logging::init_mobile`); everything that happens
+before the unpacked settings are read — the unpacking itself included — can only be seen under the
+`RustStdoutStderr` tag, into which `tao` redirects stdout and stderr.
+
+Only Android is wired up: `run_mobile` is `#[cfg(target_os = "android")]`, and an iOS package would
+need its own way to unpack the bundle.
+
 ## Configuration
 
-- `Laplace.toml` (platform config, **gitignored** — it is a local file, not a template):
+- `Laplace.toml` in the repo root (platform config, **gitignored** — it is a local file, not a template):
   `platform.lang`, `platform.frontend_assets_root` (defaults to `lapps/front`),
   `log.spec`, `lapps.path`, `lapps.allowed`. Path is overridable with `-c/--config`.
   Env overrides use the `LAPLACE_` prefix, e.g. `LAPLACE_PLATFORM_LANG=ru`.
@@ -77,9 +138,16 @@ CI (`.github/workflows/ci.yml`) runs only `cargo make lint` and `cargo make test
   Note: this manifest is defined in `crates/settings` but is **not yet read** by the host —
   `LappsManager::load_lapps` currently just scans `lapps.path` for directories.
 - `crates/app/Tauri.toml` — Tauri config. It is **compiled into the binary** by
-  `tauri::generate_context!()`, so changing it requires a rebuild of `laplace-app`.
-  Assets are *not* embedded: `run()` replaces them with `FsStoredAssets`, which reads from
-  `platform.frontend_assets_root` at runtime.
+  `tauri::generate_context!()`, so changing it requires a rebuild of `laplace-app`. The assets it
+  embeds from `frontend-dist` are never used: both `run_desktop` and `run_mobile` replace them with
+  `FsStoredAssets`, which reads from `platform.frontend_assets_root` at runtime.
+- `crates/app/gen/android/app/src/main/assets/data/Laplace.toml` — the same platform config for the
+  Android package, with paths relative to the data directory. It is unpacked once and never
+  overwritten afterwards, so on a device the file the app reads is
+  `Documents/Laplace/Laplace.toml`, which the user may edit. Its `platform.mobile` section is read
+  on mobile only: `overwrite_existing_assets` (default `true`) lets the unpacking after an
+  installation or update replace the data directory files that are already there; turned off, it
+  only writes the ones missing from it.
 
 ## Frontend conventions
 
@@ -112,6 +180,9 @@ branches in the workspace `Cargo.toml`.
   structure, and the fact that the `app://` URI-scheme handler in `crates/app/src/lib.rs` is dead
   code (no window uses that scheme; it also reads paths from the filesystem root). Do not treat
   it as a working asset path.
+- The lapp frontends are packed into the APK twice: `tauri::generate_context!` embeds
+  `frontend-dist` (`lapps/front/`) into the binary even though `FsStoredAssets` always replaces it,
+  and `android-assets` ships the same files as package assets.
 - `crates/front/src/lapps.rs::list()` returns a hardcoded single `echo` entry; there is no
   command yet to enumerate real lapps from the host.
 - `handle_http` and `LappState::new` use `expect`/panic liberally — a missing or broken lapp

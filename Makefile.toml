@@ -1,3 +1,5 @@
+env_files = ["./.env"]
+
 [config]
 default_to_workspace = false
 additional_profiles = ["debug"]
@@ -8,6 +10,9 @@ APP_NAME = "laplace"
 TARGET_DIR = "target"
 BACK_OUTPUT_DIR = "lapps/back"
 FRONT_OUTPUT_DIR = "lapps/front"
+ANDROID_PACKAGE = "org.laplace"
+ANDROID_PROJECT_DIR = "crates/app/gen/android"
+ANDROID_ASSETS_DIR = "${ANDROID_PROJECT_DIR}/app/src/main/assets/data"
 # NOTE: `web_sys_unstable_apis` cfg enables the Web Animations bindings in web-sys used by `wingy-hypertext-web`.
 RUSTFLAGS = "--cfg=web_sys_unstable_apis"
 
@@ -18,6 +23,7 @@ PROFILE_BUILD_DIR = "${PROFILE}"
     [tasks.choose-profile.env.debug]
     PROFILE = "dev"
     PROFILE_BUILD_DIR = "debug"
+    DEBUG_FLAG = "--debug"
 
 [tasks.choose-profile-web.env]
 RUSTFLAGS = "-Copt-level=z --cfg=web_sys_unstable_apis"
@@ -79,7 +85,7 @@ args = [
 ]
 
 [tasks.optimize-front]
-condition = { env = { "PROFILE" = "wasm-release" } }
+condition = { env = { PROFILE = "wasm-release" } }
 command = "wasm-opt"
 args = [
     "-Oz",
@@ -139,47 +145,145 @@ dependencies = ["build-back", "deploy-back"]
 ## ---------
 
 [tasks.build-app]
-toolchain = "stable"
 command = "cargo"
-args = ["tauri", "build"]
+toolchain = "stable"
+args = ["tauri", "build", "@@remove-empty(DEBUG_FLAG)"]
 dependencies = ["choose-profile"]
 
-[tasks.build-app-debug]
-extend = "build-app"
-args = ["tauri", "build", "--debug"]
-
 [tasks.app]
-run_task = [
-    { name = ["build-app-debug"], condition = { env = { PROFILE = "dev" } } },
-    { name = ["build-app"], condition = { env_not = { PROFILE = "dev" } } },
-]
+run_task = "build-app"
 dependencies = ["choose-profile"]
 
 [tasks.vendor]
-env = { "APP_NAME" = "vendor" }
+env = { APP_NAME = "vendor" }
 run_task = "copy-static"
 
-[tasks.laplace]
-env = { "APP_NAME" = "laplace" }
-run_task = { name = ["front", "app"] }
+[tasks.laplace-front]
+env = { APP_NAME = "laplace" }
+run_task = "front"
 dependencies = ["vendor"]
 
+[tasks.laplace]
+env = { APP_NAME = "laplace" }
+run_task = "app"
+dependencies = ["laplace-front"]
+
 [tasks.echo]
-env = { "APP_NAME" = "echo" }
+env = { APP_NAME = "echo" }
 run_task = { name = ["front", "back"] }
 
 [tasks.examples]
 dependencies = ["echo"]
 
+[tasks.lapps]
+description = "Build everything that is deployed: vendored web assets, the Laplace frontend and the examples"
+dependencies = ["laplace-front", "examples"]
+
 [tasks.all]
 dependencies = ["laplace", "examples"]
+
+## -------------
+## MARK: Android
+## -------------
+
+# `cargo tauri android` needs `ANDROID_HOME` and `NDK_HOME` (or `ANDROID_NDK_ROOT`) pointing at an
+# installed SDK and NDK, and `JAVA_HOME` at a JDK 17+ — see the Android section of the README.
+
+[tasks.choose-profile-android]
+dependencies = ["choose-profile"]
+
+[tasks.choose-profile-android.env]
+ANDROID_SIGN = true
+APK_OUT_DIR = "${ANDROID_PROJECT_DIR}/app/build/outputs/apk/universal/${PROFILE_BUILD_DIR}"
+
+    [tasks.choose-profile-android.env.debug]
+    ANDROID_SIGN = false
+
+[tasks.android-assets]
+description = "Stage the built lapps into the package assets, from where the app unpacks them at startup"
+script_runner = "@duckscript"
+script = '''
+rm -r ${ANDROID_ASSETS_DIR}/lapps
+glob_cp ${FRONT_OUTPUT_DIR}/**/* ${ANDROID_ASSETS_DIR}/lapps/front/
+glob_cp ${BACK_OUTPUT_DIR}/**/* ${ANDROID_ASSETS_DIR}/lapps/back/
+'''
+dependencies = ["lapps"]
+
+[tasks.android-build]
+description = "Build a universal APK (all ABIs)"
+command = "cargo"
+args = ["tauri", "android", "build", "--apk", "@@remove-empty(DEBUG_FLAG)"]
+dependencies = ["choose-profile-android", "android-assets"]
+
+[tasks.android-keystore]
+description = "Generate the release keystore (interactive; asks for the passwords and the certificate fields)"
+condition = { env_true = ["ANDROID_SIGN"], files_not_exist = ["${ANDROID_KEYSTORE}"] }
+command = "keytool"
+args = [
+    "-genkeypair",
+    "-v",
+    "-keystore",
+    "${ANDROID_KEYSTORE}",
+    "-keyalg",
+    "RSA",
+    "-keysize",
+    "2048",
+    "-validity",
+    "10000",
+    "-alias",
+    "laplace",
+]
+dependencies = ["choose-profile-android"]
+
+[tasks.android-sign]
+description = "Zipalign and sign the release APK with `${ANDROID_KEYSTORE}` (no-op for `-p debug`)"
+condition = { env_true = ["ANDROID_SIGN"] }
+script_runner = "@duckscript"
+script = '''
+unsigned_apk = set "${APK_OUT_DIR}/app-universal-release-unsigned.apk"
+aligned_apk = set "${APK_OUT_DIR}/app-universal-release-aligned.apk"
+signed_apk = set "${APK_OUT_DIR}/app-universal-release-signed.apk"
+
+exec --fail-on-error zipalign -f -p 4 ${unsigned_apk} ${aligned_apk}
+exec --fail-on-error apksigner sign --ks ${ANDROID_KEYSTORE} --ks-key-alias laplace --ks-pass env:ANDROID_KEYSTORE_PASS --key-pass env:ANDROID_KEY_PASS --out ${signed_apk} ${aligned_apk}
+rm ${aligned_apk}
+exec --fail-on-error apksigner verify --print-certs ${signed_apk}
+'''
+dependencies = ["choose-profile-android", "android-keystore"]
+
+[tasks.android-log]
+description = "Follow the Rust-side log of the app on the connected device or emulator"
+command = "adb"
+args = ["logcat", "-s", "Laplace:V", "RustStdoutStderr:V"]
+
+[tasks.android-dev]
+description = "Build, install and run a debug build on a connected device with its log attached"
+command = "cargo"
+args = ["tauri", "android", "dev"]
+dependencies = ["android-assets"]
+
+[tasks.android-install]
+description = "Install the built APK on the connected device or emulator"
+env = { APK_NAME = { source = "${PROFILE}", default_value = "app-universal-release-signed.apk", mapping = { "dev" = "app-universal-debug.apk" } } }
+command = "adb"
+args = ["install", "-r", "${APK_OUT_DIR}/${APK_NAME}"]
+dependencies = ["choose-profile-android"]
+
+[tasks.android]
+description = "Build, sign, install and launch the Android app"
+dependencies = ["android-build", "android-sign", "android-install"]
+
+[tasks.android-start]
+description = "Launch the installed app on the connected device or emulator"
+command = "adb"
+args = ["shell", "am", "start", "-n", "${ANDROID_PACKAGE}/.MainActivity"]
 
 ## -----------------
 ## MARK: Run
 ## -----------------
 
 [tasks.start]
-env = { "APP_NAME" = "laplace", RUST_LOG = { value = "info", condition = { env_not_set = ["RUST_LOG"] } } }
+env = { APP_NAME = "laplace", RUST_LOG = { value = "info", condition = { env_not_set = ["RUST_LOG"] } } }
 command = "target/${PROFILE}/${APP_NAME}-app"
 dependencies = ["choose-profile"]
 
