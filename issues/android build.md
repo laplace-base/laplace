@@ -301,3 +301,49 @@ adb logcat | grep Rust
 
 ---
 
+Как сделать так, чтобы приложение разворачивалось не на весь экран, а только на не занятую верхней системной панелью область? То есть, чтобы индикаторы сети и заряда не накладывались на окно приложения поверх, как сейчас.
+
+---
+
+● Пока идёт сборка — суть проблемы и решение.
+
+  Причина. В crates/app/gen/android/app/src/main/java/org/laplace/MainActivity.kt (файл не автогенерируемый, редактируется) шаблон Tauri вызывает enableEdgeToEdge(): окно раскладывается под системными панелями.
+  Просто убрать этот вызов недостаточно — при targetSdk = 36 (app/build.gradle.kts) Android 15+ включает edge-to-edge принудительно, а в Android 16 убрана и лазейка windowOptOutEdgeToEdgeEnforcement.
+  Правильный путь — не отказываться от edge-to-edge, а забрать у системы insets и отступить на них.
+  
+  Что сделано — MainActivity.kt:
+  
+  enableEdgeToEdge()
+  super.onCreate(savedInstanceState)                                                       
+  
+  // The Rust side adds the webview to this container, so padding it is what keeps the page out
+  // from under the status bar, the navigation bar, a display cutout and the soft keyboard.
+  ViewCompat.setOnApplyWindowInsetsListener(findViewById<View>(android.R.id.content)) { view, windowInsets ->
+    val insets = windowInsets.getInsets(
+      WindowInsetsCompat.Type.systemBars()
+        or WindowInsetsCompat.Type.displayCutout()                                         
+        or WindowInsetsCompat.Type.ime()
+    )   
+    view.setPadding(insets.left, insets.top, insets.right, insets.bottom)
+    WindowInsetsCompat.CONSUMED
+  } 
+  
+  Почему именно так:
+  
+  - отступ ставится на android.R.id.content — контейнер, в который Rust-сторона (RustWebView) добавляет webview; padding контейнера действует и на детей, добавленных позже, поэтому не важно, что webview
+    создаётся после onCreate;
+  - systemBars() закрывает и верхнюю панель, и нижнюю навигационную; displayCutout() — «челку» в ландшафте; ime() — клавиатуру (иначе при edge-to-edge она наезжает на страницу, adjustResize на API 30+ уже не
+    спасает);
+  - слушатель пересчитывается сам при повороте, появлении клавиатуры и смене режима навигации, так что жёстко зашитых высот нигде нет;
+  - CONSUMED — дальше по дереву insets не идут, webview их второй раз не применит.
+  
+  Полоса под статус-баром показывает android:windowBackground темы (Theme.MaterialComponents.DayNight.NoActionBar → белый/тёмный по системной теме). Если она будет заметно отличаться от фона страницы, точка
+  правки — res/values/themes.xml и res/values-night/themes.xml (<item name="android:windowBackground">), либо цвет скрима можно задать через enableEdgeToEdge(statusBarStyle = SystemBarStyle.…).
+  
+  Никаких новых зависимостей не нужно: androidx.core.view.* приходит транзитивно с appcompat/activity-ktx.
+  
+  Собираю сейчас debug-APK, чтобы проверить, что Kotlin компилируется. Отдельно: у тебя в окружении NDK_HOME указывает на ndk/27.2.12479018, которого нет — установлен только 29.0.13846066; для сборки я
+  подставил его. На устройстве отступы, разумеется, не проверял — это надо посмотреть глазами после установки.
+
+---
+
