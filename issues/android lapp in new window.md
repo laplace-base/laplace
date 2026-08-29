@@ -335,3 +335,151 @@
     (на старте) и open_lapp. Скорее всего, там будет пустой экран. Если это подтвердится, лечится обработкой создания activity без окна на Rust-стороне.
 
 ---
+
+Если основное окно не закрывать, то повторный тап на приложении активирует это окно. Если основное окно закрыть, а окно лаппа - нет, то после повторного тапа появляется чёрное окно.
+
+---
+
+● Подтвердилось то, о чём я предупреждал. Разберусь в причине.
+● Причину нашёл, она подтверждается исходниками tao/wry. 
+
+  Почему так. Точка входа run_mobile (и, значит, единственный WebviewWindowBuilder для лаунчера) выполняется один раз на процесс: tao::create() порождает поток с main() из WryLifecycleObserver.onCreate, а это
+  наблюдатель ProcessLifecycleOwner — он срабатывает при создании процесса, а не activity.
+  
+  Дальше:
+  
+  - Back по окну лаунчера финиширует MainActivity → tao шлёт WindowEvent::Destroyed → Tauri удаляет окно main. Процесс жив, потому что жива activity лаппа.
+  - Повторный тап по иконке создаёт новый экземпляр MainActivity. run_mobile уже отработал, окно никто не строит.
+  - Автоподхвата тоже нет: wry пересоздаёт webview в android_setup только если в WEBVIEW_ATTRIBUTES есть запись по id этой activity, а новый экземпляр получает новый id (WryActivity.onCreate: savedInstanceState
+    ?: intent.extras ?: hashCode()), и старая запись к тому же удалена в onWebviewDestroy.
+  
+  Итого — activity без contentView, видно windowBackground темы, то есть чёрный прямоугольник. Когда окно лаунчера не закрывали, оно живо, и тап просто поднимает задачу — поэтому там всё нормально.
+
+  Чего не хватает для починки. Привязать webview к уже существующей activity через публичный API tao нельзя: Window::new либо стартует новую activity (activity_name), либо берёт next_available_activity() — а
+  тот отдаёт контекст с наименьшим ActivityId (поле window_created в tao вообще никогда не выставляется в true), то есть может попасть в окно лаппа. Отсюда варианты решения различаются по цене и риску.
+
+● User declined to answer questions
+  ⎿  · Как чинить чёрное окно лаунчера? (Пересоздавать окно (Рекомендую) / Не закрывать лаунчер / Пропатчить tao / Пока не чинить)
+  
+● Что уточнить по вариантам? Могу подробнее раскрыть любой из них — цену, риски, что именно меняется в коде, — или ответить на вопрос, который я не учёл.
+  
+  Если полезно, вот на чём я могу дать больше деталей:
+  
+  - Насколько рискован вариант с фиксированным id — что конкретно сломается, если tao поменяет next_available_activity/window_created, и как это подстраховать проверкой во время выполнения.
+  - Дыра в варианте с moveTaskToBack — насколько реально пользователь смахивает задачу лаунчера из recents, и что он увидит в этом случае.
+  - Объём патча tao — что именно там менять и как это уживётся с обновлениями tauri, который тянет tao транзитивно.
+  - Альтернативы, которых нет в списке — например, вообще не делать лаунчер отдельным окном Tauri, или заводить его webview заново из run_mobile-подобной точки на каждую MainActivity.
+  - Диагностика — стоит ли сперва проверить гипотезу дешёвым экспериментом на устройстве, прежде чем выбирать.
+
+---
+
+Расскажи подробнее о варианте "Пересоздавать окно"
+
+---
+
+● Разберу вариант детально. Сначала уточню два факта в исходниках, чтобы не соврать.
+● Ниже — разбор без правок в коде. Всё, на что опираюсь, проверено в исходниках tao 0.35.3 / wry 0.55.1 / tauri 2.11.5.
+
+  Идея
+
+  MainActivity получает фиксированный id окна, и при своём создании сообщает Rust-стороне: «я есть, окна лаунчера нет — построй». Rust строит обычное WebviewWindowBuilder без activity_name, и tao подставляет
+  туда уже существующую пустую activity вместо того, чтобы стартовать новую.
+
+  Почему фиксированный id
+
+  Единственная ветка tao, которая привязывает окно к готовой activity, — Window::new с activity_name: None:
+
+  None => ndk_glue::next_available_activity()   // platform_impl/android/mod.rs
+
+  а next_available_activity() — это
+
+  CONTEXTS.lock().unwrap().iter().filter(|(_, ctx)| !ctx.window_created).next()
+
+  CONTEXTS — BTreeMap<ActivityId, AndroidContext>, а window_created в tao никогда не выставляется в true (проверил: поле объявляется, читается в этом фильтре и один раз пишется как false). То есть фактически
+  выбирается activity с наименьшим id.
+
+  Id берётся в WryActivity.onCreate:
+
+  id = savedInstanceState?.getInt(ACTIVITY_ID_KEY) ?: intent.extras?.getInt(ACTIVITY_ID_KEY) ?: hashCode()
+
+  Окна лаппов получают Random.nextInt(). Значит, если MainActivity кладёт себе в интент Int.MIN_VALUE, она гарантированно наименьшая (коллизия — 1 из 2³²).
+
+  Бонус: id постоянный, поэтому повторная регистрация просто перезаписывает запись в CONTEXTS — протухшие контексты лаунчера не копятся.
+
+  Что меняется, по файлам
+
+  1. MainActivity.kt — постановка id и сигнал в Rust:
+
+  class MainActivity : LaplaceActivity() {
+    private external fun restoreLauncherWindow()
+
+    override fun onCreate(savedInstanceState: Bundle?) {                                   
+      // Читается внутри WryActivity.onCreate, поэтому строго до super.                    
+      intent.putExtra("__wryActivityId", Int.MIN_VALUE)                                    
+      super.onCreate(savedInstanceState)                                                   
+      restoreLauncherWindow()                                                              
+    }                                                                                      
+  }                                                                                        
+                                                                                           
+  Имя ключа придётся написать литералом: в WryActivity.kt это private val на уровне файла.
+
+  2. android/window.rs — экспорт JNI-функции (android_fn! уже доступен: он в tao::platform::android::prelude) и тело:
+                                                                                           
+  android_fn!(org, laplace, MainActivity, restoreLauncherWindow, []);                      
+                                                                                           
+  pub unsafe fn restoreLauncherWindow(_: JNIEnv, _: JClass, _: JObject) {                  
+      let Some(handle) = crate::app_handle() else { return };      // ещё не стартовали    
+      if handle.get_webview_window(LAUNCHER_LABEL).is_some() { return }  // окно живо      
+                                                                                           
+      // Страховка от смены поведения tao: убеждаемся, что окно уедет в лаунчер.           
+      match next_available_activity() {                                                    
+          Some((_, ctx)) if ctx.activity_name.ends_with("MainActivity") => {},             
+          other => { log::error!("..."); return },
+      }                                                                                    
+
+      thread::spawn(move || { WebviewWindowBuilder::new(&handle, LAUNCHER_LABEL, url).build() });
+  }                                                                                        
+                                                                                           
+  next_available_activity() — публичная функция из того же prelude, так что проверку «tao выберет именно нашу activity» можно сделать в рантайме. Это снимает главный риск варианта: при изменении апстрима окно
+  не уедет молча в лапп, а появится ошибка в логе.                                         
+                                                                                           
+  3. lib.rs — глобальный AppHandle (OnceLock), заполняемый в tauri::Builder::setup, и константа метки. Метка окна лаунчера — "main": в Tauri.toml у [[app.windows]] её нет, а дефолт в tauri-utils — "main". URL —
+  laplace/index.html оттуда же.                                                            
+                                                                                           
+  4. proguard-rules.pro — keep для restoreLauncherWindow. Вызывающий у неё есть, но JNI ищет символ по имени Java_org_laplace_MainActivity_restoreLauncherWindow, а R8 метод переименует. Ровно та же грабля, что
+  была с moveToFront, только проявится опять лишь в релизе.                                
+
+  Три подводных камня                                                                      
+
+  Дедлок главного потока. Строить окно прямо в onCreate нельзя. build() блокируется до ответа event loop, а webview создаётся колбэком лупера на главном потоке Android (MainPipe регистрируется в wryCreate,
+  который вызван с главного потока). Синхронный вызов = главный поток ждёт сам себя. Отсюда thread::spawn и никакого ожидания результата.
+                                                                                           
+  Гонка первого старта. run_mobile крутится в своём потоке и сам создаёт окно; MainActivity.onCreate вполне может отработать раньше, чем Tauri вообще построен. Guard app_handle() → None → выходим, окно создаст
+  обычный путь.                                                                            
+                                                                                           
+  Перекрытие старого и нового экземпляра. При фиксированном id, если система когда-нибудь создаст новый экземпляр до уничтожения старого, onActivityDestroy старого удалит CONTEXTS[MIN_VALUE], то есть контекст
+  нового. В нашем сценарии перекрытия нет (пользователь закрыл окно, потом тапнул), поворот исключён configChanges в манифесте. Но место хрупкое, и это стоит записать в CLAUDE.md.
+                                                                                           
+  Цена и покрытие
+
+  Порядка 60–80 строк: ~15 Kotlin, ~40 Rust, 4 строки proguard, плюс документация. С проверкой на устройстве — примерно полдня.
+                                                                                           
+  Покрывает оба пути потери окна: Back по лаунчеру и свайп его задачи из recents. Если лаппов не открыто, вопрос вообще не возникает — процесс умирает вместе с последней activity, и следующий тап даёт обычный
+  холодный старт.                                                                          
+                                                                                           
+  Проверять надо в релизной сборке тоже (из-за R8), сценариями: закрыть лаунчер → тап по иконке; закрыть лаунчер → поработать в лаппе → тап; смахнуть задачу лаунчера из recents → тап; и обратный порядок —
+  открыть лапп, закрыть лаунчер, вернуться в лапп через recents.
+
+---
+
+Пока не будем чинить
+
+---
+
+● Понял, оставляю как есть. По этой проблеме я ничего не менял — только читал исходники, так что в рабочем дереве изменений от неё нет.
+
+  Актуальное состояние на всякий случай: последние правки в дереве — это фокус лаппов (LappActivity, proguard-rules.pro, android/{mod,data,window}.rs, api/laplace.rs), они собраны и работают.
+
+  Если захочешь, могу одной строкой записать поведение в «Known rough edges» в CLAUDE.md или в issues/android build.md, чтобы не потерялось — скажи.
+
+---
