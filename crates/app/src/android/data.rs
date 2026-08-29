@@ -1,4 +1,4 @@
-//! The data directory of the Android package and the assets it is filled from.
+//! The data directory of the package and the assets it is filled from.
 //!
 //! The lapps live in a directory of the shared storage — `Documents/Laplace` — so that it outlives
 //! the app, is visible over MTP and can be written to from a file manager. Reaching it by path
@@ -16,14 +16,14 @@
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
-use std::{fs, io, thread};
+use std::{fs, io};
 
 use anyhow::{Context as _, bail};
+use jni::JNIEnv;
 use jni::objects::{JObject, JObjectArray, JString, JValue};
-use jni::{JNIEnv, JavaVM};
 use laplace_settings::LaplaceSettings;
-use tauri::tao::platform::android::prelude::{AndroidContext, main_android_context};
+
+use super::{LOCAL_FRAME_CAPACITY, package_name, sdk_int};
 
 /// The settings file, read by the host and editable by the user.
 pub const CONFIG_FILE_NAME: &str = "Laplace.toml";
@@ -35,14 +35,6 @@ const SHARED_DIR_NAME: &str = "Laplace";
 /// Holds the package stamp the data was unpacked from, so that a reinstall refreshes the files and
 /// an ordinary restart leaves them as they are.
 const STAMP_FILE_NAME: &str = ".unpacked";
-
-/// The mobile entry point runs on a thread that `tao` spawns from `WryActivity.onCreate`, before
-/// the very same method registers the activity, so the context has to be waited for.
-const CONTEXT_TIMEOUT: Duration = Duration::from_secs(5);
-const CONTEXT_POLL_INTERVAL: Duration = Duration::from_millis(10);
-
-/// Local references held while listing a single directory or copying a single file.
-const LOCAL_FRAME_CAPACITY: i32 = 32;
 
 /// The chunk `AssetManager.open` streams are pumped through.
 const COPY_BUFFER_LEN: i32 = 64 * 1024;
@@ -75,17 +67,7 @@ impl DataDir {
 
 /// Picks the data directory and unpacks whatever of the packaged data is missing from it.
 pub fn prepare_data_dir() -> anyhow::Result<DataDir> {
-    let context = wait_for_activity_context()?;
-
-    // SAFETY: both pointers come from the activity registered by `tao` and stay valid for the
-    // lifetime of the process: `java_vm` is the process-wide VM and `context_jobject` is a global
-    // reference to the activity.
-    let vm = unsafe { JavaVM::from_raw(context.java_vm.cast()) }.context("Invalid Java VM pointer")?;
-    let activity = unsafe { JObject::from_raw(context.context_jobject.cast()) };
-
-    let mut env = vm
-        .attach_current_thread()
-        .context("Failed to attach the current thread to the Java VM")?;
+    let (mut env, activity) = super::attach_to_app()?;
 
     let mut warnings = Vec::new();
     let shared = has_full_storage_access(&mut env, &activity)?;
@@ -149,21 +131,6 @@ pub fn prepare_data_dir() -> anyhow::Result<DataDir> {
         unpacked_bytes: unpacked.bytes,
         warnings,
     })
-}
-
-/// Waits for `tao` to register the activity everything else is reached through.
-fn wait_for_activity_context() -> anyhow::Result<AndroidContext> {
-    let deadline = Instant::now() + CONTEXT_TIMEOUT;
-
-    loop {
-        if let Some(context) = main_android_context() {
-            return Ok(context);
-        }
-        if Instant::now() >= deadline {
-            bail!("The activity has not been created in {CONTEXT_TIMEOUT:?}");
-        }
-        thread::sleep(CONTEXT_POLL_INTERVAL);
-    }
 }
 
 /// Whether the app may read and write the shared storage by path.
@@ -484,22 +451,6 @@ fn scan_files(env: &mut JNIEnv, activity: &JObject, paths: &[String]) -> anyhow:
         Ok(())
     })
     .context("Failed to call MediaScannerConnection.scanFile")
-}
-
-fn sdk_int(env: &mut JNIEnv) -> anyhow::Result<i32> {
-    Ok(env
-        .get_static_field("android/os/Build$VERSION", "SDK_INT", "I")
-        .context("Failed to read Build.VERSION.SDK_INT")?
-        .i()?)
-}
-
-fn package_name(env: &mut JNIEnv, activity: &JObject) -> anyhow::Result<String> {
-    let name = env
-        .call_method(activity, "getPackageName", "()Ljava/lang/String;", &[])
-        .context("Failed to call Context.getPackageName")?
-        .l()?;
-
-    Ok(String::from(env.get_string(&JString::from(name))?))
 }
 
 /// `java.io.File.getAbsolutePath`.

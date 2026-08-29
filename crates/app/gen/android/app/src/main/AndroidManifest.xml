@@ -37,10 +37,13 @@
              this class in. `documentLaunchMode="always"` puts each instance in a task of its own,
              which is what makes the open lapps separate entries of the recents screen instead of a
              stack on top of the launcher window; the entry goes away with the window it belongs
-             to. -->
+             to. The lapps are added and removed by the user, so nothing here is per lapp and
+             `maxRecents` is the system maximum: below it, opening one lapp too many drops the task
+             of the least recently used one. -->
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
             android:documentLaunchMode="always"
+            android:maxRecents="50"
             android:autoRemoveFromRecents="true"
             android:taskAffinity="${applicationId}.lapp"
             android:label="@string/main_activity_title"

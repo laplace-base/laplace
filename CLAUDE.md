@@ -119,7 +119,24 @@ cutout and IME insets, so the page does not run under the status bar or the keyb
 task of its own. That is what makes each open lapp a separate entry of the recents screen instead of
 a stack on top of the launcher; the launcher window keeps running in the main task, and so do the
 lapp windows, since all of them are webviews of one process and one event loop.
-`autoRemoveFromRecents` drops the entry when its window is closed.
+`autoRemoveFromRecents` drops the entry when its window is closed, and `maxRecents="50"` is the
+system maximum — below it, opening one lapp too many drops the task of the least recently used one.
+Nothing is per lapp: the user adds and removes them, so one activity class serves them all and the
+manifest never has to know their number.
+
+The release build is minified (`isMinifyEnabled` in `app/build.gradle.kts`), and R8 sees no caller
+for what only native code calls by name — it drops such a method and the JNI call then fails with
+`NoSuchMethodError` in the release build alone, while `-p debug` works. Every Kotlin member the Rust
+side reaches over JNI therefore needs a keep rule in `app/proguard-rules.pro`; R8 reports what it has
+dropped in `app/build/outputs/mapping/universalRelease/usage.txt`.
+
+Opening a lapp that is already open raises its window instead of building a second one — the window
+label is the lapp name, and `handle_http` routes by it, so a lapp has one window. Raising it is
+platform work: `Window::set_focus` is a no-op in `tao` on Android, and a task is brought back by the
+activity that sits in it, so `android::window::move_lapp_window_to_front` calls the static
+`LappActivity.moveToFront` over JNI. The lapp windows register themselves there by the name `wry`
+gives the webview — which `tauri-runtime-wry` sets to the window label — and the one that is asked
+for moves its own task to the front through `ActivityManager.AppTask`.
 
 The storage permissions live in `crates/app/gen/android/app/src/main/AndroidManifest.xml`:
 `MANAGE_EXTERNAL_STORAGE` for Android 11+, `READ_EXTERNAL_STORAGE` / `WRITE_EXTERNAL_STORAGE` plus

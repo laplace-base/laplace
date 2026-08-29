@@ -4,20 +4,13 @@ use tauri::webview::{DownloadEvent, PageLoadEvent};
 use tauri::{AppHandle, Manager as _, WebviewUrl, WebviewWindowBuilder};
 
 use crate::State;
+#[cfg(target_os = "android")]
+use crate::android;
 
 #[tauri::command]
 pub fn get_lang(state: tauri::State<State>) -> String {
     state.lang.clone()
 }
-
-/// The activity class a lapp window is a webview of, declared in `AndroidManifest.xml`.
-///
-/// A mobile window is an activity, and one of this class is started for every lapp: the manifest
-/// makes it a document activity, so each lapp becomes an entry of the recents screen of its own
-/// while the launcher window keeps running in the main task. Without it `tao` would put the webview
-/// into the activity the launcher already occupies.
-#[cfg(target_os = "android")]
-const LAPP_ACTIVITY: &str = "LappActivity";
 
 #[tauri::command]
 pub fn open_lapp(handle: AppHandle, name: &str) {
@@ -28,9 +21,7 @@ pub fn open_lapp(handle: AppHandle, name: &str) {
     // label that is taken.
     if let Some(window) = handle.get_webview_window(name) {
         log::debug!("Lapp '{name}' is already open");
-        if let Err(err) = window.set_focus() {
-            log::warn!("Failed to focus the window of lapp '{name}': {err}");
-        }
+        raise(&window, name);
         return;
     }
 
@@ -64,7 +55,26 @@ pub fn open_lapp(handle: AppHandle, name: &str) {
         });
 
     #[cfg(target_os = "android")]
-    let builder = builder.activity_name(LAPP_ACTIVITY);
+    let builder = builder.activity_name(android::LAPP_ACTIVITY);
 
     let _lapp_window = builder.build().expect("Failed to open lapp");
+}
+
+/// Brings the window that is already open back in front of the user.
+#[cfg(not(target_os = "android"))]
+fn raise(window: &tauri::WebviewWindow, name: &str) {
+    if let Err(err) = window.set_focus() {
+        log::warn!("Failed to focus the window of lapp '{name}': {err:#}");
+    }
+}
+
+/// The window is an activity in a task of its own, which `set_focus` does not raise — it is a no-op
+/// on Android — so the task is moved to the front through the activity instead.
+#[cfg(target_os = "android")]
+fn raise(_window: &tauri::WebviewWindow, name: &str) {
+    match android::move_lapp_window_to_front(name) {
+        Ok(true) => {},
+        Ok(false) => log::warn!("No window of lapp '{name}' to bring to the front"),
+        Err(err) => log::warn!("Failed to bring the window of lapp '{name}' to the front: {err:#}"),
+    }
 }

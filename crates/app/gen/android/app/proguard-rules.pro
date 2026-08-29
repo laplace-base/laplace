@@ -19,3 +19,10 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# Whatever the Rust side calls over JNI has no caller R8 can see, so it is dropped from the release
+# build, which is the only minified one: the call then fails with `NoSuchMethodError` while the
+# debug build works. Everything reached by name from native code belongs here.
+-keepclassmembers class org.laplace.LappActivity {
+    public static boolean moveToFront(java.lang.String);
+}
