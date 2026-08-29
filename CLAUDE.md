@@ -106,6 +106,21 @@ exception on both counts: it is put back whenever it is missing, since nothing c
 and it is never replaced. It also governs the unpacking, so `android::unpack_settings` restores and
 reads it before the rest of the data is written.
 
+A window is an activity. `tao` starts one per `WebviewWindowBuilder`, looking the class up by the
+name passed to `WebviewWindowBuilder::activity_name` (Android only), so every activity a window can
+be must exist as a Kotlin class in `org.laplace` *and* be declared in the manifest. There are two:
+`MainActivity` — the launcher window, the `LAUNCHER` entry point — and `LappActivity`, which
+`open_lapp` (`crates/app/src/api/laplace.rs`) names for every lapp it opens. Both are empty
+subclasses of `LaplaceActivity`, which is where the shared window setup lives: the webview is laid
+out edge to edge (Android 15+ gives no choice) and the content view is padded by the system-bar,
+cutout and IME insets, so the page does not run under the status bar or the keyboard.
+
+`LappActivity` is declared with `documentLaunchMode="always"`, which puts every instance of it in a
+task of its own. That is what makes each open lapp a separate entry of the recents screen instead of
+a stack on top of the launcher; the launcher window keeps running in the main task, and so do the
+lapp windows, since all of them are webviews of one process and one event loop.
+`autoRemoveFromRecents` drops the entry when its window is closed.
+
 The storage permissions live in `crates/app/gen/android/app/src/main/AndroidManifest.xml`:
 `MANAGE_EXTERNAL_STORAGE` for Android 11+, `READ_EXTERNAL_STORAGE` / `WRITE_EXTERNAL_STORAGE` plus
 `requestLegacyExternalStorage` for the API levels below it. The all-files access is a *special*

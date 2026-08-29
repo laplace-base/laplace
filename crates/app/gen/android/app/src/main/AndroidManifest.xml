@@ -33,6 +33,20 @@
             </intent-filter>
         </activity>
 
+        <!-- A lapp window, started by `open_lapp` through `tao` for every webview window it names
+             this class in. `documentLaunchMode="always"` puts each instance in a task of its own,
+             which is what makes the open lapps separate entries of the recents screen instead of a
+             stack on top of the launcher window; the entry goes away with the window it belongs
+             to. -->
+        <activity
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
+            android:documentLaunchMode="always"
+            android:autoRemoveFromRecents="true"
+            android:taskAffinity="${applicationId}.lapp"
+            android:label="@string/main_activity_title"
+            android:name=".LappActivity"
+            android:exported="false" />
+
         <provider
           android:name="androidx.core.content.FileProvider"
           android:authorities="${applicationId}.fileprovider"
