@@ -49,15 +49,15 @@ serde-wasm-bindgen = "0.6"
 serde_json = "1.0"
 strum = { version = "0.28", features = ["derive"] }
 tauri = { version = "2.11", features = ["config-toml", "devtools"] }
-tauri-build = { version = "2.6", default-features = false, features = ["config-toml"] }
-tauri-plugin-opener = "2.5"
-tauri-plugin-shell = "2.3"
+tauri-build = { version = "2.7", default-features = false, features = ["config-toml"] }
+tauri-plugin-opener = "2.7"
+tauri-plugin-shell = "2.4"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
-wasm-dom = "2.1"
+wasm-dom = "2.2"
 wasm-web-helpers = "0.2"
-wasmtime = "48.0"
-wasmtime-wasi = "48.0"
+wasmtime = "49.0"
+wasmtime-wasi = "49.0"
 web-sys = { version = "0.3" }
 wingy-hypertext = { git = "https://github.com/XX/wingy-hypertext", branch = "dev" }
 wingy-hypertext-web = { git = "https://github.com/XX/wingy-hypertext", branch = "dev" }
