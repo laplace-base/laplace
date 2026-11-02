@@ -222,6 +222,9 @@ branches in the workspace `Cargo.toml`.
   sorted alphabetically — keep `[workspace.dependencies]` sorted when adding entries).
 - All workspace crates use `x = { workspace = true }` dependency inheritance; add new shared
   deps to `[workspace.dependencies]` first.
+- Comments and doc comments: only where they add something the code does not say, and as short as
+  possible — usually one line. No restating the code, no history of the change, no essays on
+  alternatives; design reasoning belongs in `docs/` or the issue file.
 
 ## Known rough edges
 
