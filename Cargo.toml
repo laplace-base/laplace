@@ -31,7 +31,6 @@ clap = { version = "4.6", features = ["derive"] }
 config = "0.15"
 console_log = "1.1"
 flexi_logger = "0.31"
-futures = "0.3"
 http = "1.5"
 http-serde = "2.1"
 hypertext = { git = "https://github.com/XX/hypertext", branch = "dev", features = ["axum", "htmx"] }
@@ -52,6 +51,7 @@ tauri = { version = "2.11", features = ["config-toml", "devtools"] }
 tauri-build = { version = "2.7", default-features = false, features = ["config-toml"] }
 tauri-plugin-opener = "2.7"
 tauri-plugin-shell = "2.4"
+thiserror = "2.0"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 wasm-dom = "2.2"

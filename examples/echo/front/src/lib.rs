@@ -32,16 +32,29 @@ pub async fn router(path: &str) -> String {
         path.into()
     };
 
-    log::info!("req: {path}");
+    log::debug!("req: {path}");
 
     let request = Request::get(path).build().expect_throw("Error building request");
-    let handle_http_fut = handle_http(&request).expect_throw("Error making handle_http");
-    let response = handle_http_fut.await.expect_throw("Error calling handle_http");
-    let response = String::from_utf8(response.body).expect_throw("Error decoding response body");
-
-    log::info!("resp: {response}");
+    let response = match request_back(&request).await {
+        Ok(response) => {
+            log::debug!("resp: {response}");
+            response
+        },
+        Err(err) => {
+            log::error!("{err}");
+            format!("Error: {err}")
+        },
+    };
 
     rsx! { <div>(response)</div> }.render().into_inner()
+}
+
+async fn request_back(request: &Request) -> Result<String, String> {
+    let response = handle_http(request)
+        .map_err(|err| err.to_string())?
+        .await
+        .map_err(|err| err.to_string())?;
+    String::from_utf8(response.body).map_err(|err| format!("Error decoding response body: {err}"))
 }
 
 fn main_section() -> impl Renderable {

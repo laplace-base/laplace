@@ -1,3 +1,5 @@
+use std::sync::PoisonError;
+
 use laplace_common_api::http;
 use wasmtime::component::bindgen;
 
@@ -78,9 +80,9 @@ mod convert {
         }
     }
 
-    pub fn from_wit_http_response(response: Response) -> http::Response {
-        http::Response {
-            status: StatusCode::from_u16(response.status).expect("Invalid status code"),
+    pub fn from_wit_http_response(response: Response) -> Result<http::Response, http::status::InvalidStatusCode> {
+        Ok(http::Response {
+            status: StatusCode::from_u16(response.status)?,
             version: from_wit_http_version(&response.version),
             headers: response
                 .headers
@@ -91,23 +93,38 @@ mod convert {
                 })
                 .collect(),
             body: response.body,
-        }
+        })
     }
 }
 
+/// Hands the request of a lapp frontend to the backend of the same lapp — the one named by the
+/// label of the calling window.
+///
+/// A lapp that is not loaded or fails to handle the request is reported by an error, which rejects
+/// the `invoke` promise of the frontend.
 #[tauri::command]
 pub fn handle_http(
     webview_window: tauri::WebviewWindow,
     state: tauri::State<State>,
     request: http::Request,
-) -> http::Response {
+) -> Result<http::Response, String> {
     let lapp_name = webview_window.label();
-    let mut lapps = state.lapps.lock().expect("Lapps lock failed");
-    let response = lapps
+
+    process_http(&state, lapp_name, request).inspect_err(|err| log::error!("{err}"))
+}
+
+fn process_http(state: &State, lapp_name: &str, request: http::Request) -> Result<http::Response, String> {
+    // A poisoned lock only means that a call has panicked while holding it, which must not make
+    // every other lapp unreachable as well.
+    let mut lapps = state.lapps.lock().unwrap_or_else(PoisonError::into_inner);
+    let lapp = lapps
         .get_mut(lapp_name)
-        .expect("Lapp not found")
+        .ok_or_else(|| format!("Lapp '{lapp_name}' is not loaded"))?;
+
+    let response = lapp
         .http_handle(&convert::into_wit_http_request(request))
-        .expect("Failed to call http::handle function");
+        .map_err(|err| format!("Lapp '{lapp_name}' failed to handle the request: {err:#}"))?;
 
     convert::from_wit_http_response(response)
+        .map_err(|err| format!("Lapp '{lapp_name}' returned an invalid response: {err}"))
 }

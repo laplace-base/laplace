@@ -1,7 +1,7 @@
 use std::collections::HashMap;
+use std::fs;
 use std::path::Path;
 use std::sync::Mutex;
-use std::{fs, io};
 
 use laplace_settings::LaplaceSettings;
 use laplace_settings::laplace::LappsSettings;
@@ -33,16 +33,39 @@ impl LappsManager {
         Self { engine }
     }
 
-    pub fn load_lapps(&self, settings: LappsSettings) -> anyhow::Result<Lapps> {
+    /// Loads the backends of the lapps found in `settings.path`.
+    ///
+    /// A lapp that fails to load is skipped with an error in the log.
+    pub fn load_lapps(&self, settings: LappsSettings) -> Lapps {
         let mut lapps = HashMap::new();
-        let read_dir = fs::read_dir(&settings.path)?;
+        let Ok(read_dir) = fs::read_dir(&settings.path).inspect_err(|err| {
+            log::error!(
+                "Failed to read the lapps directory '{}': {err}",
+                settings.path.display()
+            )
+        }) else {
+            return lapps;
+        };
 
         for entry in read_dir {
-            let entry = entry?;
-            let lapp_name = entry.file_name().into_string().map_err(|invalid_name| {
-                log::error!("Lapp name '{invalid_name:?}' is not valid UTF-8");
-                io::Error::from(io::ErrorKind::InvalidData)
-            })?;
+            let Ok(entry) = entry.inspect_err(|err| {
+                log::error!(
+                    "Failed to read an entry of the lapps directory '{}': {err}",
+                    settings.path.display()
+                )
+            }) else {
+                continue;
+            };
+
+            let Ok(lapp_name) = entry.file_name().into_string() else {
+                log::error!("Lapp name {:?} is not valid UTF-8", entry.file_name());
+                continue;
+            };
+
+            if !entry.path().is_dir() {
+                log::debug!("Skip '{}': not a lapp directory", entry.path().display());
+                continue;
+            }
 
             if let Some(allowed_lapps) = &settings.allowed
                 && !allowed_lapps.contains(&lapp_name)
@@ -50,13 +73,16 @@ impl LappsManager {
                 continue;
             }
 
-            lapps.insert(
-                lapp_name.clone(),
-                LappState::from_file(&self.engine, entry.path(), lapp_name)?,
-            );
+            let Ok(lapp) = LappState::from_file(&self.engine, entry.path(), lapp_name.clone())
+                .inspect_err(|err| log::error!("Failed to load lapp '{lapp_name}': {err:#}"))
+            else {
+                continue;
+            };
+
+            lapps.insert(lapp_name, lapp);
         }
 
-        Ok(lapps)
+        lapps
     }
 }
 
@@ -113,7 +139,7 @@ pub struct State {
 pub fn run_desktop(settings: LaplaceSettings) {
     log::info!("Run");
     let manager = LappsManager::new();
-    let lapps = manager.load_lapps(settings.lapps).expect("Failed load lapps");
+    let lapps = manager.load_lapps(settings.lapps);
 
     start(
         settings.platform.lang,
@@ -152,7 +178,7 @@ pub fn run_mobile() {
     }
 
     let manager = LappsManager::new();
-    let lapps = manager.load_lapps(settings.lapps).expect("Failed load lapps");
+    let lapps = manager.load_lapps(settings.lapps);
 
     start(
         settings.platform.lang,
@@ -210,4 +236,33 @@ fn start(lang: String, lapps: Lapps, assets: Box<dyn Assets<Wry>>) {
         })
         .run(context)
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn load_lapps_skips_what_fails_to_load() {
+        let root = std::env::temp_dir().join(format!("laplace-load-lapps-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("broken")).unwrap();
+        fs::write(root.join("broken").join("broken-back.wasm"), b"not a wasm component").unwrap();
+        fs::create_dir_all(root.join("missing")).unwrap();
+        fs::write(root.join("not-a-lapp.txt"), b"").unwrap();
+
+        let manager = LappsManager::new();
+        let lapps = manager.load_lapps(LappsSettings {
+            path: root.clone(),
+            allowed: None,
+        });
+        let no_dir_lapps = manager.load_lapps(LappsSettings {
+            path: root.join("no-such-dir"),
+            allowed: None,
+        });
+        fs::remove_dir_all(&root).unwrap();
+
+        assert!(lapps.is_empty());
+        assert!(no_dir_lapps.is_empty());
+    }
 }

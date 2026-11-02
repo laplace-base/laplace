@@ -8,9 +8,9 @@ repository.workspace = true
 description = "The frontend API of the local-first web-application platform"
 
 [dependencies]
-futures = { workspace = true }
 laplace-common-api = { workspace = true }
 serde = { workspace = true }
 serde-wasm-bindgen = { workspace = true }
+thiserror = { workspace = true }
 wasm-bindgen = { workspace = true }
 wasm-bindgen-futures = { workspace = true }

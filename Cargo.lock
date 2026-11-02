@@ -2819,10 +2819,10 @@ dependencies = [
 name = "laplace-front-api"
 version = "0.1.0"
 dependencies = [
- "futures",
  "laplace-common-api",
  "serde",
  "serde-wasm-bindgen",
+ "thiserror 2.0.21",
  "wasm-bindgen",
  "wasm-bindgen-futures",
 ]
