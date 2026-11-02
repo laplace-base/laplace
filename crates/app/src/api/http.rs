@@ -1,6 +1,7 @@
 use std::sync::PoisonError;
 
 use laplace_common_api::http;
+use tauri::{AppHandle, Manager as _};
 use wasmtime::component::bindgen;
 
 pub use self::exports::laplace::http::types::{Header, Method, Request, Response, Uri};
@@ -103,23 +104,28 @@ mod convert {
 /// A lapp that is not loaded or fails to handle the request is reported by an error, which rejects
 /// the `invoke` promise of the frontend.
 #[tauri::command]
-pub fn handle_http(
+pub async fn handle_http(
+    app: AppHandle,
     webview_window: tauri::WebviewWindow,
-    state: tauri::State<State>,
     request: http::Request,
 ) -> Result<http::Response, String> {
-    let lapp_name = webview_window.label();
+    let lapp_name = webview_window.label().to_owned();
 
-    process_http(&state, lapp_name, request).inspect_err(|err| log::error!("{err}"))
+    tauri::async_runtime::spawn_blocking(move || process_http(&app.state::<State>(), &lapp_name, request))
+        .await
+        .unwrap_or_else(|err| Err(format!("The request handling task has failed: {err}")))
+        .inspect_err(|err| log::error!("{err}"))
 }
 
 fn process_http(state: &State, lapp_name: &str, request: http::Request) -> Result<http::Response, String> {
-    // A poisoned lock only means that a call has panicked while holding it, which must not make
-    // every other lapp unreachable as well.
-    let mut lapps = state.lapps.lock().unwrap_or_else(PoisonError::into_inner);
-    let lapp = lapps
-        .get_mut(lapp_name)
+    let lapp = state
+        .lapps
+        .get(lapp_name)
         .ok_or_else(|| format!("Lapp '{lapp_name}' is not loaded"))?;
+
+    // A poisoned lock only means that a call has panicked while holding it, which must not make
+    // the lapp unreachable for good: its instance reports by itself whether it is still usable.
+    let mut lapp = lapp.lock().unwrap_or_else(PoisonError::into_inner);
 
     let response = lapp
         .http_handle(&convert::into_wit_http_request(request))

@@ -73,7 +73,7 @@ impl LappsManager {
                 continue;
             }
 
-            let Ok(lapp) = LappState::from_file(&self.engine, entry.path(), lapp_name.clone())
+            let Ok(lapp) = LappState::load(&self.engine, entry.path(), lapp_name.clone())
                 .inspect_err(|err| log::error!("Failed to load lapp '{lapp_name}': {err:#}"))
             else {
                 continue;
@@ -95,7 +95,7 @@ pub struct LappState {
 
 impl LappState {
     /// Loads `<root_path>/<name>-back.wasm` from the filesystem.
-    pub fn from_file(engine: &Engine, root_path: impl AsRef<Path>, name: impl Into<String>) -> anyhow::Result<Self> {
+    pub fn load(engine: &Engine, root_path: impl AsRef<Path>, name: impl Into<String>) -> anyhow::Result<Self> {
         let name = name.into();
         let path = root_path.as_ref().join(format!("{name}-back.wasm"));
         let component = Component::from_file(engine, &path)
@@ -133,7 +133,7 @@ type Lapps = HashMap<String, LappState>;
 
 pub struct State {
     pub lang: String,
-    pub lapps: Mutex<Lapps>,
+    pub lapps: HashMap<String, Mutex<LappState>>,
 }
 
 pub fn run_desktop(settings: LaplaceSettings) {
@@ -197,7 +197,7 @@ fn start(lang: String, lapps: Lapps, assets: Box<dyn Assets<Wry>>) {
     tauri::Builder::default()
         .manage(State {
             lang,
-            lapps: Mutex::new(lapps),
+            lapps: lapps.into_iter().map(|(name, lapp)| (name, Mutex::new(lapp))).collect(),
         })
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![

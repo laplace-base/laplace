@@ -75,15 +75,16 @@ CI (`.github/workflows/ci.yml`) runs only `cargo make lint` and `cargo make test
 context, so suppress the progress output and keep only warnings, errors and test results:
 
 ```sh
-CARGO_TERM_QUIET=true cargo make --loglevel error lint
-CARGO_TERM_QUIET=true cargo make --loglevel error test
+CARGO_TERM_QUIET=true cargo make lint
+CARGO_TERM_QUIET=true cargo make test
 cargo check -q --message-format=short -p laplace-app   # direct cargo: also one line per diagnostic
 ```
 
-`CARGO_TERM_QUIET` hides cargo's status lines (warnings and errors still show), `--loglevel error`
-hides cargo-make's own task log. A silent run with exit code 0 means success. Only when a
-diagnostic needs its full context, rerun that one crate without `--message-format=short`; pipe long
-outputs through `tail`/`grep` rather than reading them whole.
+`CARGO_TERM_QUIET` hides cargo's status lines; warnings, errors and test results still show, plus a
+few `[cargo-make] INFO` lines per task. Do **not** add `--loglevel error` to `cargo make`: it
+suppresses the output of the commands themselves, compiler errors included, and leaves only the exit
+code. Only when a diagnostic needs its full context, rerun that one crate without
+`--message-format=short`; pipe long outputs through `tail`/`grep` rather than reading them whole.
 
 ## Android
 
