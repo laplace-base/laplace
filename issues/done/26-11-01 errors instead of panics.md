@@ -58,4 +58,3 @@
 ---
 
 Убрал тест load_lapps_skips_what_fails_to_load.
-
