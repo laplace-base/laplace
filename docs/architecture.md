@@ -1,0 +1,127 @@
+# Архитектура
+
+Laplace — платформа local-first веб-приложений. Пользовательские данные и логика приложений живут на
+устройстве пользователя, а не на сервере; сервисы в сети — лишь опциональные источники данных и
+точки встречи пиров.
+
+```
+   традиционная схема                       local-first схема
+
+        Service ◄── персональные данные      Service      Service
+        /     \                                 ┊   ╲      ┊
+   Client     Client                       Client ┄┄┄┄┄┄ Client
+                                          (данные)      (данные)
+```
+
+Приложения, которые исполняет Laplace, называются **лаппами** (lapp — Laplace application).
+
+## Текущее устройство
+
+```
+┌──────────────────────────── laplace-app (процесс Tauri) ──────────────────────────────┐
+│                                                                                       │
+│  окно «laplace» (лаунчер)      окно «echo»                 окно «<lapp>»              │
+│  ┌──────────────────────┐     ┌──────────────────────┐                                │
+│  │ laplace-front (wasm) │     │ echo-front (wasm)    │     WebView на окно;           │
+│  │ hypertext + wingy    │     │ htmx client-router   │     метка окна = имя лаппа     │
+│  └─────────┬────────────┘     └─────────┬────────────┘                                │
+│            │ invoke("open_lapp")         │ invoke("handle_http", Request)             │
+│  ──────────┼─────────────────────────────┼──────────── Tauri IPC ─────────────────────│
+│            ▼                             ▼                                            │
+│   api::laplace::open_lapp       api::http::handle_http ── по метке окна ──┐           │
+│   (WebviewWindowBuilder)                                                  ▼           │
+│                                       State { lapps: Mutex<HashMap<имя, LappState>> } │
+│                                                    │                                  │
+│   FsStoredAssets ◄── tauri://… (ассеты окон)       ▼ wasmtime (component model)       │
+│   читает platform.frontend_assets_root      echo-back.wasm: export by-client-handler  │
+│                                                                                       │
+└───────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Компоненты
+
+| Крейт | Назначение |
+| --- | --- |
+| `laplace-app` (`crates/app`) | Хост: CLI, чтение `Laplace.toml`, логирование, `LappsManager` (wasmtime), Tauri-команды, раздача ассетов (`FsStoredAssets`), Android-обвязка |
+| `laplace-settings` | Схемы `Laplace.toml` (`LaplaceSettings`) и манифеста лаппа `config.toml` (`LappSettings`, `Permission`) |
+| `laplace-common-api` | Сериализуемые `http::{Request, Response, Header}` — общий язык фронта и хоста |
+| `laplace-front-api` | Обёртка над `window.__TAURI__.core.invoke` для wasm-фронтов (`handle_http`, `invoke`) |
+| `laplace-front` | Лаунчер — UI самой платформы, лапп с именем `laplace` без back-части |
+| `examples/echo/{back,front}` | Эталонный лапп |
+| `wit/http.wit` | WIT-мир `laplace:http`, который экспортирует каждый back |
+| `webassets/vendor` | htmx, расширение `client-router`, стили wingy; раздаётся как псевдо-лапп `vendor` |
+
+### Лапп = front + back
+
+- **front** — модуль `wasm32-unknown-unknown` (`wasm-bindgen`), рисующий HTML через `hypertext` `rsx!` и
+  компоненты `wingy-hypertext`. Интерактивность — htmx; расширение `client-router` перехватывает
+  `htmx:configRequest` и отдаёт запрос wasm-функции `router`/`route`, а не в сеть.
+- **back** — WASI-компонент (`wasm32-wasip1`, `cargo component`, `wit-bindgen-rt`), исполняемый
+  `wasmtime` внутри процесса хоста. Экспортирует `by-client-handler.handle(request) -> response`.
+- Ни сокета, ни HTTP-сервера нет: фронт строит `laplace_common_api::http::Request`, вызывает команду
+  `handle_http`, хост конвертирует запрос в WIT-типы и вызывает back лаппа, имя которого — метка окна.
+
+### Путь запроса
+
+1. Элемент с `hx-get="/echo/api/..."` → htmx → `client-router` → `wasm.router(path)`.
+2. `router` → `laplace_front_api::http::handle_http(&Request)` → `invoke("handle_http")`.
+3. `api::http::handle_http(webview_window, state, request)` берёт `webview_window.label()`, находит
+   `LappState`, конвертирует запрос и зовёт `call_handle` под общим `Mutex`.
+4. Ответ back-а возвращается фронту; тот рендерит HTML-фрагмент, htmx вставляет его в DOM.
+
+### Окна
+
+`open_lapp(name)` строит `WebviewWindowBuilder` с меткой `name` и URL `<name>/index.html`; уже
+открытый лапп поднимается, а не открывается второй раз. На Android окно — activity: лаунчер —
+`MainActivity`, каждый лапп — `LappActivity` в отдельной задаче (`documentLaunchMode="always"`).
+
+### Раскладка на диске
+
+```
+Laplace.toml                       платформенный конфиг (на Android — Documents/Laplace/Laplace.toml)
+lapps/front/<name>/index.html      фронт лаппа: webassets + dist/<name>-front{.js,_bg.wasm}
+lapps/front/laplace/               лаунчер
+lapps/front/vendor/                htmx, wingy
+lapps/back/<name>/<name>-back.wasm back лаппа
+```
+
+Манифест `config.toml` пока никуда не раскладывается и хостом не читается. На Android всё это
+упаковано в APK как assets и распаковывается в каталог данных (подробно — в `AGENTS.md`).
+
+## Чем это отличается от прежних реализаций
+
+Прежний Laplace (`../old/laplace`) был HTTP-сервером: лаппы открывались в обычном браузере.
+Промежуточная версия (`../old/laplace-new-old`) — первый прототип на Tauri, функционально почти
+совпадающий с текущим кодом (текущий — его доработка).
+
+| Аспект | Прежний `laplace_server` | Текущий `laplace-app` |
+| --- | --- | --- |
+| Оболочка | axum-сервер (HTTP/HTTPS, self-signed TLS) + браузер пользователя | Tauri 2, своё окно на лапп, Android-пакет |
+| Доступ | access token в cookie на путь лаппа | процесс локальный, сети нет; разграничение — по метке окна (пока не проверяется) |
+| Back | core-модуль wasm, ручное ABI: `alloc`/`dealloc`, `WasmSlice`, borsh, макрос `#[http::process]` | WASI-компонент, WIT-мир, `wasmtime::component::bindgen!` / `cargo component` |
+| Исполнение | поток на лапп, актор `LappService` (`truba`), async wasmtime, ленивый запуск + `autoload` | все лаппы грузятся при старте, один `Mutex` на всех, синхронный вызов |
+| Возможности back-а | FS (preopen `data_dir`), SQLite, исходящий HTTP (reqwest, фильтр методов/хостов), sleep — по разрешениям | только WASI без preopen |
+| Push к клиенту | WebSocket ↔ `route_ws` | нет |
+| P2P | libp2p gossipsub + mDNS, `route_gossipsub` | нет (только настройки) |
+| UI платформы | Yew + MDC: список, вкл/выкл, autoload, разрешения, загрузка `.lar`, ошибки | hypertext + wingy + htmx: захардкоженный список из одного лаппа, кнопка «открыть» |
+| Фронт лаппов | Yew-приложения со своим `index.html` в `static/` | hypertext + wingy + htmx, клиентский роутинг |
+| Раскладка | `lapps/<name>/{config.toml, <name>_server.wasm, static/, data/}` | `lapps/front/<name>/` и `lapps/back/<name>/` раздельно |
+| Тесты | интеграционные: запуск сервера, проверка доступа по HTTP | нет |
+
+## Целевая архитектура
+
+Направление, в котором ведёт план миграции (`issues/26-10-01 migration plan.md`):
+
+- **Реестр лаппов** отдельно от **исполнения**: хост читает манифесты всех лаппов, а инстанс back-а
+  поднимает лениво или при старте (`autoload`), только для включённых.
+- **Исполнитель на лапп**: каждый инстанс в своём потоке/задаче с очередью сообщений (аналог
+  `LappService`), с таймаутом вызова (epoch interruption) и лимитами памяти; паника или trap
+  лаппа не роняет платформу.
+- **Возможности back-а — WIT-импорты**, линкуемые только при выданном разрешении: файловая система
+  (preopen каталога данных), база данных, исходящий HTTP (`wasi:http` с фильтром), push во фронт,
+  P2P. Back экспортирует обработчики: `handle` для запросов фронта, обработчики входящих сообщений
+  и инициализацию.
+- **Push вместо WebSocket**: события/каналы Tauri в окно лаппа.
+- **Разграничение доступа по окну**: команды управления платформой доступны только окну
+  `laplace`, лапп видит только свои ассеты и свой back.
+- **Установка лаппов** из архива `.lar` без перезапуска платформы.

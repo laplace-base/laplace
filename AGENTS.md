@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Guidance for Claude Code when working in this repository.
+Guidance for AI agents when working in this repository.
 
 ## What this is
 
@@ -31,6 +31,8 @@ lapp's `by-client-handler.handle`. The Tauri window *label* is the lapp name —
 | `webassets/vendor` | — | Vendored htmx + wingy CSS, deployed as the `vendor` "app" |
 | `crates/app/gen/android` | — | Generated-but-committed Android Studio project (`cargo tauri android init`); `app/src/main/assets/data/` is what the app unpacks at startup |
 | `lapps/` | — | **Build output** (gitignored): `lapps/back/<name>/<name>-back.wasm`, `lapps/front/<name>/` |
+| `docs/` | — | Architecture, domain glossary and requirements (Russian); read before design work |
+| `issues/` | — | Task files (Russian): open ones at the top level, `done/`, `deferred/`; `26-10-01 migration plan.md` is the roadmap of porting the old Laplace (`../old/laplace`) features |
 
 `crates/app` builds both a lib (`laplace_app_lib`) and a bin; `main.rs` only parses CLI args,
 loads settings and logging, then calls `laplace_app_lib::run_desktop`.
