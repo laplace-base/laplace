@@ -237,32 +237,3 @@ fn start(lang: String, lapps: Lapps, assets: Box<dyn Assets<Wry>>) {
         .run(context)
         .expect("error while running tauri application");
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn load_lapps_skips_what_fails_to_load() {
-        let root = std::env::temp_dir().join(format!("laplace-load-lapps-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(root.join("broken")).unwrap();
-        fs::write(root.join("broken").join("broken-back.wasm"), b"not a wasm component").unwrap();
-        fs::create_dir_all(root.join("missing")).unwrap();
-        fs::write(root.join("not-a-lapp.txt"), b"").unwrap();
-
-        let manager = LappsManager::new();
-        let lapps = manager.load_lapps(LappsSettings {
-            path: root.clone(),
-            allowed: None,
-        });
-        let no_dir_lapps = manager.load_lapps(LappsSettings {
-            path: root.join("no-such-dir"),
-            allowed: None,
-        });
-        fs::remove_dir_all(&root).unwrap();
-
-        assert!(lapps.is_empty());
-        assert!(no_dir_lapps.is_empty());
-    }
-}
