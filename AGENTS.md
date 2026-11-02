@@ -71,6 +71,20 @@ Backs go `cargo component build` → copy to `lapps/back/<APP_NAME>/<APP_NAME>-b
 
 CI (`.github/workflows/ci.yml`) runs only `cargo make lint` and `cargo make test`.
 
+**Agents: run builds quietly.** A full build prints hundreds of `Compiling …` lines that only waste
+context, so suppress the progress output and keep only warnings, errors and test results:
+
+```sh
+CARGO_TERM_QUIET=true cargo make --loglevel error lint
+CARGO_TERM_QUIET=true cargo make --loglevel error test
+cargo check -q --message-format=short -p laplace-app   # direct cargo: also one line per diagnostic
+```
+
+`CARGO_TERM_QUIET` hides cargo's status lines (warnings and errors still show), `--loglevel error`
+hides cargo-make's own task log. A silent run with exit code 0 means success. Only when a
+diagnostic needs its full context, rerun that one crate without `--message-format=short`; pipe long
+outputs through `tail`/`grep` rather than reading them whole.
+
 ## Android
 
 `cargo tauri android` additionally needs `ANDROID_HOME`, `NDK_HOME` (pointing at an **installed** NDK
@@ -219,5 +233,6 @@ branches in the workspace `Cargo.toml`.
   and `android-assets` ships the same files as package assets.
 - `crates/front/src/lapps.rs::list()` returns a hardcoded single `echo` entry; there is no
   command yet to enumerate real lapps from the host.
-- `handle_http` and `LappState::new` use `expect`/panic liberally — a missing or broken lapp
-  brings down the command.
+- `open_lapp` still panics when the window fails to build; `handle_http` and `load_lapps` report
+  errors instead (a broken lapp is skipped at startup, a failed request rejects the `invoke`
+  promise of the frontend).
