@@ -199,41 +199,11 @@ fn start(lang: String, lapps: Lapps, assets: Box<dyn Assets<Wry>>) {
             lang,
             lapps: lapps.into_iter().map(|(name, lapp)| (name, Mutex::new(lapp))).collect(),
         })
-        .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
             api::laplace::get_lang,
             api::laplace::open_lapp,
             api::http::handle_http,
         ])
-        .register_uri_scheme_protocol("app", move |ctx, request| {
-            log::info!("Request: {request:?}, label: {}", ctx.webview_label());
-            let asset_path = request.uri().path();
-
-            let content = match fs::read(asset_path) {
-                Ok(content) => content,
-                Err(err) => {
-                    return http::Response::builder()
-                        .status(404)
-                        .body(err.to_string().into_bytes())
-                        .unwrap();
-                },
-            };
-
-            let mime_type = if asset_path.ends_with(".html") {
-                mime::TEXT_HTML
-            } else if asset_path.ends_with(".css") {
-                mime::TEXT_CSS
-            } else if asset_path.ends_with(".js") {
-                mime::TEXT_JAVASCRIPT
-            } else {
-                mime::APPLICATION_OCTET_STREAM
-            };
-
-            http::Response::builder()
-                .header("Content-Type", mime_type.as_ref())
-                .body(content)
-                .unwrap()
-        })
         .run(context)
         .expect("error while running tauri application");
 }
