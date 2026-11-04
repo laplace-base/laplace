@@ -5,7 +5,7 @@ use std::sync::Mutex;
 
 use laplace_settings::LaplaceSettings;
 use laplace_settings::laplace::LappsSettings;
-use tauri::{Assets, Wry, http};
+use tauri::{Assets, Wry};
 use wasmtime::component::{Component, Linker};
 use wasmtime::error::Context;
 use wasmtime::{Engine, Store};

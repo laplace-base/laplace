@@ -71,6 +71,11 @@ Backs go `cargo component build` → copy to `lapps/back/<APP_NAME>/<APP_NAME>-b
 
 CI (`.github/workflows/ci.yml`) runs only `cargo make lint` and `cargo make test`.
 
+Host tests live in `crates/app/tests/` and run real lapp backends through
+`laplace_app_lib::api::http::process_http` — the `handle_http` path without Tauri. They load the
+components from `lapps/back/`, so `cargo make test` first builds and deploys them (`test-backs`);
+a new backend a test needs goes there too. Plain `cargo test` fails on a missing component.
+
 **Agents: run builds quietly.** A full build prints hundreds of `Compiling …` lines that only waste
 context, so suppress the progress output and keep only warnings, errors and test results:
 
@@ -229,12 +234,12 @@ branches in the workspace `Cargo.toml`.
 ## Known rough edges
 
 - `NOTES.md` (Russian, gitignored) tracks open design questions — mobile bootstrap flow, README
-  structure, and the fact that the `app://` URI-scheme handler in `crates/app/src/lib.rs` is dead
-  code (no window uses that scheme; it also reads paths from the filesystem root). Do not treat
-  it as a working asset path.
+  structure.
 - The lapp frontends are packed into the APK twice: `tauri::generate_context!` embeds
   `frontend-dist` (`lapps/front/`) into the binary even though `FsStoredAssets` always replaces it,
   and `android-assets` ships the same files as package assets.
+- `laplace-app` does not compile while `lapps/front/` is missing — `generate_context!` requires
+  `frontend-dist` to exist; CI creates it empty.
 - `crates/front/src/lapps.rs::list()` returns a hardcoded single `echo` entry; there is no
   command yet to enumerate real lapps from the host.
 - `open_lapp` still panics when the window fails to build; `handle_http` and `load_lapps` report

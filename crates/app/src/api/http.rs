@@ -117,7 +117,7 @@ pub async fn handle_http(
         .inspect_err(|err| log::error!("{err}"))
 }
 
-fn process_http(state: &State, lapp_name: &str, request: http::Request) -> Result<http::Response, String> {
+pub fn process_http(state: &State, lapp_name: &str, request: http::Request) -> Result<http::Response, String> {
     let lapp = state
         .lapps
         .get(lapp_name)

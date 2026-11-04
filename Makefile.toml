@@ -322,11 +322,16 @@ dependencies = ["choose-profile"]
 run_task = "clippy"
 dependencies = ["fmt-check"]
 
+[tasks.test-backs]
+description = "Build and deploy the lapp backends the host tests load"
+env = { APP_NAME = "echo" }
+run_task = "back"
+
 [tasks.test]
 toolchain = "stable"
 command = "cargo"
 args = ["test"]
-dependencies = ["choose-profile"]
+dependencies = ["choose-profile", "test-backs"]
 
 [tasks.lint-test]
 run_task = "test"

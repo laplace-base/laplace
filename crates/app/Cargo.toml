@@ -24,7 +24,6 @@ flexi_logger = { workspace = true }
 laplace-common-api = { workspace = true }
 laplace-settings = { workspace = true }
 log = { workspace = true }
-mime = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tauri = { workspace = true }
