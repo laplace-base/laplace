@@ -10,3 +10,5 @@ spec = "info"
 
 [lapps]
 path = "lapps/back"
+config_root = "lapps/config"
+data_root = "lapps/data"

@@ -7,6 +7,17 @@ use crate::lapp::access::Permission;
 
 pub mod access;
 
+/// File name of the lapp manifest in the lapp directory.
+pub const MANIFEST_FILE_NAME: &str = "manifest.toml";
+
+/// Whether `name` can name a lapp: it is a directory and file name, a window label and a host name.
+pub fn is_valid_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
+
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct ApplicationSettings {
@@ -17,12 +28,6 @@ pub struct ApplicationSettings {
     pub tags: Option<Vec<String>>,
     pub access_token: Option<String>,
     pub additional_static_dirs: Vec<PathBuf>,
-    #[serde(default = "default_data_dir")]
-    pub data_dir: PathBuf,
-}
-
-fn default_data_dir() -> PathBuf {
-    PathBuf::from("data")
 }
 
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]

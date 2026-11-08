@@ -43,7 +43,7 @@ Laplace — платформа local-first веб-приложений. Поль
 | Крейт | Назначение |
 | --- | --- |
 | `laplace-app` (`crates/app`) | Хост: CLI, чтение `Laplace.toml`, логирование, `LappsManager` (wasmtime), Tauri-команды, раздача ассетов (`FsStoredAssets`), Android-обвязка |
-| `laplace-settings` | Схемы `Laplace.toml` (`LaplaceSettings`) и манифеста лаппа `config.toml` (`LappSettings`, `Permission`) |
+| `laplace-settings` | Схемы `Laplace.toml` (`LaplaceSettings`) и манифеста лаппа `manifest.toml` (`LappSettings`, `Permission`) |
 | `laplace-common-api` | Сериализуемые `http::{Request, Response, Header}` — общий язык фронта и хоста |
 | `laplace-front-api` | Обёртка над `window.__TAURI__.core.invoke` для wasm-фронтов (`handle_http`, `invoke`) |
 | `laplace-front` | Лаунчер — UI самой платформы, лапп с именем `laplace` без back-части |
@@ -78,15 +78,37 @@ Laplace — платформа local-first веб-приложений. Поль
 ### Раскладка на диске
 
 ```
-Laplace.toml                       платформенный конфиг (на Android — Documents/Laplace/Laplace.toml)
-lapps/front/<name>/index.html      фронт лаппа: webassets + dist/<name>-front{.js,_bg.wasm}
-lapps/front/laplace/               лаунчер
-lapps/front/vendor/                htmx, wingy
-lapps/back/<name>/<name>-back.wasm back лаппа
+Laplace.toml                        платформенный конфиг (на Android — Documents/Laplace/Laplace.toml)
+lapps/back/<name>/manifest.toml     манифест лаппа; каталог есть у каждого лаппа
+lapps/back/<name>/<name>-back.wasm  back лаппа, необязательный
+lapps/front/<name>/index.html       фронт лаппа: webassets + dist/<name>-front{.js,_bg.wasm}
+lapps/front/vendor/                 htmx, wingy
+lapps/config/<name>.toml            решения пользователя о лаппе
+lapps/data/<name>/                  каталог данных лаппа по умолчанию
 ```
 
-Манифест `config.toml` пока никуда не раскладывается и хостом не читается. На Android всё это
-упаковано в APK как assets и распаковывается в каталог данных (подробно — в `AGENTS.md`).
+Лапп разложен по четырём корням, и важно, кто их пишет:
+
+| Корень | Настройка | Чей | Кто пишет |
+| --- | --- | --- | --- |
+| `lapps/back/<name>/` | `lapps.path` | автора | сборка, распаковка на Android, установка лаппа |
+| `lapps/front/<name>/` | `platform.frontend_assets_root` | автора | то же |
+| `lapps/config/<name>.toml` | `lapps.config_root` | пользователя | только хост, по решениям пользователя |
+| `lapps/data/<name>/` | `lapps.data_root` | пользователя | лапп (через preopen) |
+
+Корни автора заменяются целиком, корни пользователя этими операциями не трогаются никогда, так что
+обновление лаппа не может ни выдать ему права, ни сбросить выданные. Решения пользователя лежат
+отдельно от данных, потому что каталог данных целиком отдаётся лаппу. Каталог данных по умолчанию —
+`data_root/<name>/`; пользователь может указать другой, а манифест — нет. Каталогов по версиям нет:
+у имени один каталог в каждом корне.
+
+Имя лаппа — `[a-z0-9-]`: оно одновременно имя каталога и файла, метка окна и (позже) хост origin.
+Каталоги, имя которых начинается с `.`, служебные (замена при обновлении) и пропускаются молча.
+
+Пока хост только раскладывает манифест и по нему отличает лапп без back-а от сломанного; читать
+манифест и `lapps/config/` он начнёт с реестра (план, этап 1.4). На Android корни автора упакованы
+в APK как assets и распаковываются в каталог данных, корни пользователя в пакет не входят (подробно —
+в `AGENTS.md`).
 
 ## Чем это отличается от прежних реализаций
 
@@ -105,7 +127,7 @@ lapps/back/<name>/<name>-back.wasm back лаппа
 | P2P | libp2p gossipsub + mDNS, `route_gossipsub` | нет (только настройки) |
 | UI платформы | Yew + MDC: список, вкл/выкл, autoload, разрешения, загрузка `.lar`, ошибки | hypertext + wingy + htmx: захардкоженный список из одного лаппа, кнопка «открыть» |
 | Фронт лаппов | Yew-приложения со своим `index.html` в `static/` | hypertext + wingy + htmx, клиентский роутинг |
-| Раскладка | `lapps/<name>/{config.toml, <name>_server.wasm, static/, data/}` | `lapps/front/<name>/` и `lapps/back/<name>/` раздельно |
+| Раскладка | `lapps/<name>/{config.toml, <name>_server.wasm, static/, data/}` | четыре корня: `lapps/{back,front}/<name>/` автора, `lapps/config/<name>.toml` и `lapps/data/<name>/` пользователя |
 | Тесты | интеграционные: запуск сервера, проверка доступа по HTTP | нет |
 
 ## Целевая архитектура

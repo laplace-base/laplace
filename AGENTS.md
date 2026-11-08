@@ -23,14 +23,14 @@ lapp's `by-client-handler.handle`. The Tauri window *label* is the lapp name —
 | --- | --- | --- |
 | `crates/app` | `laplace-app` | Tauri host: CLI, settings load, wasmtime lapp manager, Tauri commands, asset provider |
 | `crates/front` | `laplace-front` | The Laplace launcher UI, compiled to wasm |
-| `crates/settings` | `laplace-settings` | `Laplace.toml` (platform) and lapp `config.toml` schemas |
+| `crates/settings` | `laplace-settings` | `Laplace.toml` (platform) and lapp `manifest.toml` schemas |
 | `crates/common-api` | `laplace-common-api` | Serde-able `http::{Request,Response,Header}` shared by host and front |
 | `crates/front-api` | `laplace-front-api` | wasm-side bindings to `window.__TAURI__.core.invoke` |
 | `examples/echo/{back,front}` | `echo-back`, `echo-front` | Reference lapp |
 | `wit/http.wit` | — | The WIT world every lapp back implements |
 | `webassets/vendor` | — | Vendored htmx + wingy CSS, deployed as the `vendor` "app" |
 | `crates/app/gen/android` | — | Generated-but-committed Android Studio project (`cargo tauri android init`); `app/src/main/assets/data/` is what the app unpacks at startup |
-| `lapps/` | — | **Build output** (gitignored): `lapps/back/<name>/<name>-back.wasm`, `lapps/front/<name>/` |
+| `lapps/` | — | Gitignored. **Build output**: `lapps/back/<name>/{manifest.toml,<name>-back.wasm}`, `lapps/front/<name>/`. **Runtime, user-owned, never touched by `cargo make`**: `lapps/config/<name>.toml`, `lapps/data/<name>/` (see Configuration) |
 | `docs/` | — | Architecture, domain glossary and requirements (Russian); read before design work |
 | `issues/` | — | Task files (Russian): open ones at the top level, `done/`, `deferred/`; `26-10-01 migration plan.md` is the roadmap of porting the old Laplace (`../old/laplace`) features |
 
@@ -68,6 +68,9 @@ without that cfg will fail to link.
 The pipeline per app (`APP_NAME`) is: `build-front` → `wasm-bindgen` into `target/dist` →
 `wasm-opt` → copy `webassets/**` and `target/dist/*` into `lapps/front/<APP_NAME>/`.
 Backs go `cargo component build` → copy to `lapps/back/<APP_NAME>/<APP_NAME>-back.wasm`.
+Both `front` and `back` also run `deploy-manifest`, which copies the lapp manifest
+`examples/<APP_NAME>/manifest.toml` to `lapps/back/<APP_NAME>/manifest.toml` — every lapp
+has that directory, with a backend or not.
 
 CI (`.github/workflows/ci.yml`) runs only `cargo make lint` and `cargo make test`.
 
@@ -185,12 +188,20 @@ need its own way to unpack the bundle.
 
 - `Laplace.toml` in the repo root (platform config, **gitignored** — it is a local file, not a template):
   `platform.lang`, `platform.frontend_assets_root` (defaults to `lapps/front`),
-  `log.spec`, `lapps.path`, `lapps.allowed`. Path is overridable with `-c/--config`.
-  Env overrides use the `LAPLACE_` prefix, e.g. `LAPLACE_PLATFORM_LANG=ru`.
-- `examples/<name>/config.toml` — per-lapp manifest (`LappSettings`): application metadata,
+  `log.spec`, `lapps.path`, `lapps.config_root`, `lapps.data_root`, `lapps.allowed`. Path is
+  overridable with `-c/--config`. Env overrides use the `LAPLACE_` prefix, e.g. `LAPLACE_PLATFORM_LANG=ru`.
+- A lapp lives in four roots (`docs/architecture.md`, «Раскладка на диске»): the author's
+  `lapps.path/<name>/` (`manifest.toml` + optional `<name>-back.wasm`) and
+  `platform.frontend_assets_root/<name>/`, replaced by builds, unpacking and installs; the user's
+  `lapps.config_root/<name>.toml` (decisions: enabled, autoload, granted permissions, data dir) and
+  `lapps.data_root/<name>/` (default data dir), which none of those touch. A lapp name is
+  `[a-z0-9-]` (`laplace_settings::lapp::is_valid_name`); `load_lapps` silently skips entries
+  starting with `.` and logs an error for other invalid names.
+- `examples/<name>/manifest.toml` — per-lapp manifest (`LappSettings`): application metadata,
   `permissions.front` / `permissions.back`, database, network, lapp-to-lapp requests.
-  Note: this manifest is defined in `crates/settings` but is **not yet read** by the host —
-  `LappsManager::load_lapps` currently just scans `lapps.path` for directories.
+  Note: the host does **not read it yet** — `LappsManager::load_lapps` only uses it to tell a lapp
+  without a backend (skipped quietly) from a broken one; `lapps.config_root` and `lapps.data_root`
+  are not used yet either.
 - `crates/app/Tauri.toml` — Tauri config. It is **compiled into the binary** by
   `tauri::generate_context!()`, so changing it requires a rebuild of `laplace-app`. The assets it
   embeds from `frontend-dist` are never used: both `run_desktop` and `run_mobile` replace them with

@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use laplace_settings::LaplaceSettings;
 use laplace_settings::laplace::LappsSettings;
+use laplace_settings::{LaplaceSettings, lapp};
 use tauri::{Assets, Wry};
 use wasmtime::component::{Component, Linker};
 use wasmtime::error::Context;
@@ -62,8 +62,19 @@ impl LappsManager {
                 continue;
             };
 
-            if !entry.path().is_dir() {
-                log::debug!("Skip '{}': not a lapp directory", entry.path().display());
+            // Hidden entries are the service directories of a lapp update.
+            if lapp_name.starts_with('.') {
+                continue;
+            }
+
+            let lapp_dir = entry.path();
+            if !lapp_dir.is_dir() {
+                log::debug!("Skip '{}': not a lapp directory", lapp_dir.display());
+                continue;
+            }
+
+            if !lapp::is_valid_name(&lapp_name) {
+                log::error!("Lapp name '{lapp_name}' is invalid: only a-z, 0-9 and '-' are allowed");
                 continue;
             }
 
@@ -73,7 +84,13 @@ impl LappsManager {
                 continue;
             }
 
-            let Ok(lapp) = LappState::load(&self.engine, entry.path(), lapp_name.clone())
+            if !LappState::back_path(&lapp_dir, &lapp_name).exists() && lapp_dir.join(lapp::MANIFEST_FILE_NAME).exists()
+            {
+                log::debug!("Skip '{lapp_name}': the lapp has no backend");
+                continue;
+            }
+
+            let Ok(lapp) = LappState::load(&self.engine, lapp_dir, lapp_name.clone())
                 .inspect_err(|err| log::error!("Failed to load lapp '{lapp_name}': {err:#}"))
             else {
                 continue;
@@ -94,10 +111,14 @@ pub struct LappState {
 }
 
 impl LappState {
-    /// Loads `<root_path>/<name>-back.wasm` from the filesystem.
+    pub fn back_path(root_path: impl AsRef<Path>, name: &str) -> PathBuf {
+        root_path.as_ref().join(format!("{name}-back.wasm"))
+    }
+
+    /// Loads [`Self::back_path`] from the filesystem.
     pub fn load(engine: &Engine, root_path: impl AsRef<Path>, name: impl Into<String>) -> anyhow::Result<Self> {
         let name = name.into();
-        let path = root_path.as_ref().join(format!("{name}-back.wasm"));
+        let path = Self::back_path(root_path, &name);
         let component = Component::from_file(engine, &path)
             .with_context(|| format!("Component file '{}' not found", path.display()))?;
 
@@ -164,6 +185,8 @@ pub fn run_mobile() {
     let mut settings = LaplaceSettings::new(data.config_path()).expect("Settings should be configured");
     settings.platform.frontend_assets_root = data.path.join(&settings.platform.frontend_assets_root);
     settings.lapps.path = data.path.join(&settings.lapps.path);
+    settings.lapps.config_root = data.path.join(&settings.lapps.config_root);
+    settings.lapps.data_root = data.path.join(&settings.lapps.data_root);
 
     logging::init_mobile(&settings.log);
     log::info!(
