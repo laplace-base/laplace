@@ -119,10 +119,10 @@ impl LaplaceSettings {
         let config = Config::builder()
             .add_source(File::from(path.as_ref()))
             // Add in settings from the environment (with a prefix of LAPLACE)
-            // Eg.. `LAPLACE_PLATFORM_LANG=ru laplace-app` would set the `platform.lang` key
+            // Eg.. `LAPLACE__PLATFORM__LANG=ru laplace-app` would set the `platform.lang` key
             .add_source(
                 Environment::with_prefix("LAPLACE")
-                    .separator("_")
+                    .separator("__")
                     .with_list_parse_key("lapps.allowed")
                     .list_separator(",")
                     .try_parsing(true),

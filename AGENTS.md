@@ -189,7 +189,7 @@ need its own way to unpack the bundle.
 - `Laplace.toml` in the repo root (platform config, **gitignored** — it is a local file, not a template):
   `platform.lang`, `platform.frontend_assets_root` (defaults to `lapps/front`),
   `log.spec`, `lapps.path`, `lapps.config_root`, `lapps.data_root`, `lapps.allowed`. Path is
-  overridable with `-c/--config`. Env overrides use the `LAPLACE_` prefix, e.g. `LAPLACE_PLATFORM_LANG=ru`.
+  overridable with `-c/--config`. Env overrides use the `LAPLACE__` prefix, e.g. `LAPLACE__PLATFORM__LANG=ru`.
 - A lapp lives in four roots (`docs/architecture.md`, «Раскладка на диске»): the author's
   `lapps.path/<name>/` (`manifest.toml` + optional `<name>-back.wasm`) and
   `platform.frontend_assets_root/<name>/`, replaced by builds, unpacking and installs; the user's
