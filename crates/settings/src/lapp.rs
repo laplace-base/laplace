@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
-use crate::lapp::access::Permission;
+use crate::lapp::access::{BackPermission, FrontPermission};
 
 pub mod access;
 
@@ -21,52 +21,38 @@ pub fn is_valid_name(name: &str) -> bool {
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct ApplicationSettings {
+    #[serde(default)]
+    pub version: String,
     pub title: String,
-    pub enabled: bool,
-    pub autoload: bool,
     pub description: Option<String>,
     pub tags: Option<Vec<String>>,
-    pub access_token: Option<String>,
     pub additional_static_dirs: Vec<PathBuf>,
 }
 
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
 #[serde(default)]
+pub struct ApplicationUserSettings {
+    #[serde(flatten)]
+    pub app: ApplicationSettings,
+    pub enabled: bool,
+    pub autoload: bool,
+    pub access_token: Option<String>,
+}
+
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
+#[serde(default)]
 pub struct PermissionsSettings {
-    pub required: Vec<Permission>,
-    pub allowed: Vec<Permission>,
+    pub front: Vec<FrontPermission>,
+    pub back: Vec<BackPermission>,
 }
 
 impl PermissionsSettings {
-    pub fn is_allowed(&self, permission: Permission) -> bool {
-        self.allowed.contains(&permission)
+    pub fn front_iter(&self) -> impl Iterator<Item = FrontPermission> + '_ {
+        self.front.iter().copied()
     }
 
-    pub fn allow(&mut self, permission: Permission) -> bool {
-        if !self.is_allowed(permission) {
-            self.allowed.push(permission);
-            true
-        } else {
-            false
-        }
-    }
-
-    pub fn deny(&mut self, permission: Permission) -> bool {
-        let index = self.allowed.iter().position(|allowed| *allowed == permission);
-        if let Some(index) = index {
-            self.allowed.remove(index);
-            true
-        } else {
-            false
-        }
-    }
-
-    pub fn required(&self) -> impl Iterator<Item = Permission> + '_ {
-        self.required.iter().copied()
-    }
-
-    pub fn allowed(&self) -> impl Iterator<Item = Permission> + '_ {
-        self.allowed.iter().copied()
+    pub fn back_iter(&self) -> impl Iterator<Item = BackPermission> + '_ {
+        self.back.iter().copied()
     }
 }
 
@@ -346,7 +332,7 @@ pub struct LappSettings {
     #[serde(default)]
     pub lapp_name: String,
     pub application: ApplicationSettings,
-    pub permissions: PermissionsSettings,
+    pub required_permissions: PermissionsSettings,
     pub database: Option<DatabaseSettings>,
     pub network: Option<NetworkSettings>,
     pub lapp_requests: Option<Vec<LappRequestsSettings>>,
@@ -361,6 +347,51 @@ impl LappSettings {
     #[inline]
     pub fn title(&self) -> &str {
         &self.application.title
+    }
+
+    pub fn database(&self) -> &DatabaseSettings {
+        static DEFAULT: DatabaseSettings = DatabaseSettings::new();
+
+        self.database.as_ref().unwrap_or(&DEFAULT)
+    }
+
+    pub fn into_database(self) -> DatabaseSettings {
+        self.database.unwrap_or_default()
+    }
+
+    pub fn network(&self) -> &NetworkSettings {
+        static DEFAULT: NetworkSettings = NetworkSettings::new();
+
+        self.network.as_ref().unwrap_or(&DEFAULT)
+    }
+
+    pub fn into_network(self) -> NetworkSettings {
+        self.network.unwrap_or_default()
+    }
+
+    pub fn lapp_requests(&self) -> &[LappRequestsSettings] {
+        static DEFAULT: Vec<LappRequestsSettings> = Vec::new();
+
+        self.lapp_requests.as_deref().unwrap_or(&DEFAULT)
+    }
+
+    pub fn into_lapp_requests(self) -> Vec<LappRequestsSettings> {
+        self.lapp_requests.unwrap_or_default()
+    }
+}
+
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct LappUserSettings {
+    pub application: ApplicationUserSettings,
+    pub allowed_permissions: PermissionsSettings,
+    pub lapp_requests: Option<Vec<LappRequestsSettings>>,
+}
+
+impl LappUserSettings {
+    #[inline]
+    pub fn title(&self) -> &str {
+        &self.application.app.title
     }
 
     #[inline]
@@ -393,26 +424,6 @@ impl LappSettings {
         self.set_autoload(!self.autoload());
     }
 
-    pub fn database(&self) -> &DatabaseSettings {
-        static DEFAULT: DatabaseSettings = DatabaseSettings::new();
-
-        self.database.as_ref().unwrap_or(&DEFAULT)
-    }
-
-    pub fn into_database(self) -> DatabaseSettings {
-        self.database.unwrap_or_default()
-    }
-
-    pub fn network(&self) -> &NetworkSettings {
-        static DEFAULT: NetworkSettings = NetworkSettings::new();
-
-        self.network.as_ref().unwrap_or(&DEFAULT)
-    }
-
-    pub fn into_network(self) -> NetworkSettings {
-        self.network.unwrap_or_default()
-    }
-
     pub fn lapp_requests(&self) -> &[LappRequestsSettings] {
         static DEFAULT: Vec<LappRequestsSettings> = Vec::new();
 
@@ -421,5 +432,59 @@ impl LappSettings {
 
     pub fn into_lapp_requests(self) -> Vec<LappRequestsSettings> {
         self.lapp_requests.unwrap_or_default()
+    }
+
+    pub fn is_front_allowed(&self, permission: FrontPermission) -> bool {
+        self.allowed_permissions.front.contains(&permission)
+    }
+
+    pub fn is_back_allowed(&self, permission: BackPermission) -> bool {
+        self.allowed_permissions.back.contains(&permission)
+    }
+
+    pub fn allow_front(&mut self, permission: FrontPermission) -> bool {
+        if !self.is_front_allowed(permission) {
+            self.allowed_permissions.front.push(permission);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn allow_back(&mut self, permission: BackPermission) -> bool {
+        if !self.is_back_allowed(permission) {
+            self.allowed_permissions.back.push(permission);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn deny_front(&mut self, permission: FrontPermission) -> bool {
+        let index = self
+            .allowed_permissions
+            .front
+            .iter()
+            .position(|allowed| *allowed == permission);
+        if let Some(index) = index {
+            self.allowed_permissions.front.remove(index);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn deny_back(&mut self, permission: BackPermission) -> bool {
+        let index = self
+            .allowed_permissions
+            .back
+            .iter()
+            .position(|allowed| *allowed == permission);
+        if let Some(index) = index {
+            self.allowed_permissions.back.remove(index);
+            true
+        } else {
+            false
+        }
     }
 }

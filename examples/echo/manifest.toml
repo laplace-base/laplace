@@ -9,4 +9,6 @@ autoload = true
 required = ["invoke_back"]
 allowed = ["invoke_back"]
 
-[permissions.back]
+[required_permissions]
+front = ["invoke_back"]
+back = []
