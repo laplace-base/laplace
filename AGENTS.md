@@ -23,7 +23,7 @@ lapp's `by-client-handler.handle`. The Tauri window *label* is the lapp name —
 | --- | --- | --- |
 | `crates/app` | `laplace-app` | Tauri host: CLI, settings load, wasmtime lapp manager, Tauri commands, asset provider |
 | `crates/front` | `laplace-front` | The Laplace launcher UI, compiled to wasm |
-| `crates/settings` | `laplace-settings` | `Laplace.toml` (platform) and lapp `manifest.toml` schemas |
+| `crates/settings` | `laplace-settings` | `Laplace.toml` (platform), lapp `manifest.toml` and user decision schemas, shared by host and front; file IO behind the `io` feature |
 | `crates/common-api` | `laplace-common-api` | Serde-able `http::{Request,Response,Header}` shared by host and front |
 | `crates/front-api` | `laplace-front-api` | wasm-side bindings to `window.__TAURI__.core.invoke` |
 | `examples/echo/{back,front}` | `echo-back`, `echo-front` | Reference lapp |
@@ -198,10 +198,15 @@ need its own way to unpack the bundle.
   `[a-z0-9-]` (`laplace_settings::lapp::is_valid_name`); `load_lapps` silently skips entries
   starting with `.` and logs an error for other invalid names.
 - `examples/<name>/manifest.toml` — per-lapp manifest (`LappSettings`): application metadata,
-  `permissions.front` / `permissions.back`, database, network, lapp-to-lapp requests.
-  Note: the host does **not read it yet** — `LappsManager::load_lapps` only uses it to tell a lapp
-  without a backend (skipped quietly) from a broken one; `lapps.config_root` and `lapps.data_root`
-  are not used yet either.
+  `required_permissions.front` / `.back`, database, network, lapp-to-lapp requests. The host only
+  ever reads it. The user decisions are `LappUserSettings` (`lapps.config_root/<name>.toml`); a
+  missing file means the initial ones (`LappUserSettings::new`). Changes go through `UpdateQuery`;
+  the effective permissions are `LappUserSettings::effective_permissions` (docs/domain.md).
+  Reading and writing these files (`LappSettings::load`, `LappUserSettings::{load, save, update}`)
+  and `LaplaceSettings::new` sit behind the `io` feature of `laplace-settings`, which the host
+  enables, so that the crate builds for `wasm32-unknown-unknown` without `config`.
+  Note: the host does **not use any of it yet** — `LappsManager::load_lapps` only checks for the
+  manifest to tell a lapp without a backend (skipped quietly) from a broken one.
 - `crates/app/Tauri.toml` — Tauri config. It is **compiled into the binary** by
   `tauri::generate_context!()`, so changing it requires a rebuild of `laplace-app`. The assets it
   embeds from `frontend-dist` are never used: both `run_desktop` and `run_mobile` replace them with

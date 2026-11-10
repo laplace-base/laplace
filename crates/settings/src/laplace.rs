@@ -1,9 +1,15 @@
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+#[cfg(feature = "io")]
+use std::path::Path;
+use std::path::PathBuf;
 
+#[cfg(feature = "io")]
 pub use config::ConfigError;
+#[cfg(feature = "io")]
 use config::{Config, Environment, File};
 use serde::{Deserialize, Serialize};
+
+use crate::lapp::MANIFEST_FILE_NAME;
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(default)]
@@ -93,6 +99,16 @@ pub struct LappsSettings {
     pub allowed: Option<HashSet<String>>,
 }
 
+impl LappsSettings {
+    pub fn manifest_path(&self, lapp_name: &str) -> PathBuf {
+        self.path.join(lapp_name).join(MANIFEST_FILE_NAME)
+    }
+
+    pub fn user_config_path(&self, lapp_name: &str) -> PathBuf {
+        self.config_root.join(format!("{lapp_name}.toml"))
+    }
+}
+
 impl Default for LappsSettings {
     fn default() -> Self {
         let lapps = PathBuf::from("lapps");
@@ -114,6 +130,7 @@ pub struct LaplaceSettings {
     pub lapps: LappsSettings,
 }
 
+#[cfg(feature = "io")]
 impl LaplaceSettings {
     pub fn new(path: impl AsRef<Path>) -> Result<Self, ConfigError> {
         let config = Config::builder()

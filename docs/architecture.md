@@ -43,7 +43,7 @@ Laplace — платформа local-first веб-приложений. Поль
 | Крейт | Назначение |
 | --- | --- |
 | `laplace-app` (`crates/app`) | Хост: CLI, чтение `Laplace.toml`, логирование, `LappsManager` (wasmtime), Tauri-команды, раздача ассетов (`FsStoredAssets`), Android-обвязка |
-| `laplace-settings` | Схемы `Laplace.toml` (`LaplaceSettings`) и манифеста лаппа `manifest.toml` (`LappSettings`, `Permission`) |
+| `laplace-settings` | Схемы `Laplace.toml` (`LaplaceSettings`), манифеста лаппа `manifest.toml` (`LappSettings`), решений пользователя (`LappUserSettings`), разрешений и `UpdateQuery`. Общий для хоста и фронта: чтение и запись файлов и `config` — за feature `io`, которую включает только хост, так что без неё крейт собирается под `wasm32-unknown-unknown` |
 | `laplace-common-api` | Сериализуемые `http::{Request, Response, Header}` — общий язык фронта и хоста |
 | `laplace-front-api` | Обёртка над `window.__TAURI__.core.invoke` для wasm-фронтов (`handle_http`, `invoke`) |
 | `laplace-front` | Лаунчер — UI самой платформы, лапп с именем `laplace` без back-части |

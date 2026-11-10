@@ -22,7 +22,7 @@ anyhow = { workspace = true }
 clap = { workspace = true }
 flexi_logger = { workspace = true }
 laplace-common-api = { workspace = true }
-laplace-settings = { workspace = true }
+laplace-settings = { workspace = true, features = ["io"] }
 log = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

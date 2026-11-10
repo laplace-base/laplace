@@ -2,13 +2,25 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
+use serde_with::skip_serializing_none;
 
-use crate::lapp::access::{BackPermission, FrontPermission};
+use crate::lapp::access::{BackPermission, FrontPermission, Permission};
+use crate::lapp::update::UpdateQuery;
 
 pub mod access;
+#[cfg(feature = "io")]
+pub mod file;
+pub mod update;
 
 /// File name of the lapp manifest in the lapp directory.
 pub const MANIFEST_FILE_NAME: &str = "manifest.toml";
+
+/// Name of the launcher, the lapp of the platform itself.
+pub const MAIN_NAME: &str = "laplace";
+
+pub fn is_main(name: &str) -> bool {
+    name == MAIN_NAME
+}
 
 /// Whether `name` can name a lapp: it is a directory and file name, a window label and a host name.
 pub fn is_valid_name(name: &str) -> bool {
@@ -29,7 +41,8 @@ pub struct ApplicationSettings {
     pub additional_static_dirs: Vec<PathBuf>,
 }
 
-#[derive(Debug, Default, Clone, Deserialize, Serialize)]
+#[skip_serializing_none]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct ApplicationUserSettings {
     #[serde(flatten)]
@@ -37,9 +50,23 @@ pub struct ApplicationUserSettings {
     pub enabled: bool,
     pub autoload: bool,
     pub access_token: Option<String>,
+    /// Data directory of the lapp: absolute, or relative to its default `<data_root>/<name>/`.
+    pub data_dir: Option<PathBuf>,
 }
 
-#[derive(Debug, Default, Clone, Deserialize, Serialize)]
+impl Default for ApplicationUserSettings {
+    fn default() -> Self {
+        Self {
+            app: ApplicationSettings::default(),
+            enabled: true,
+            autoload: false,
+            access_token: None,
+            data_dir: None,
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct PermissionsSettings {
     pub front: Vec<FrontPermission>,
@@ -47,6 +74,13 @@ pub struct PermissionsSettings {
 }
 
 impl PermissionsSettings {
+    pub fn contains(&self, permission: Permission) -> bool {
+        match permission {
+            Permission::Front(permission) => self.front.contains(&permission),
+            Permission::Back(permission) => self.back.contains(&permission),
+        }
+    }
+
     pub fn front_iter(&self) -> impl Iterator<Item = FrontPermission> + '_ {
         self.front.iter().copied()
     }
@@ -349,6 +383,10 @@ impl LappSettings {
         &self.application.title
     }
 
+    pub fn is_lapp_startup_active(&self, user: &LappUserSettings) -> bool {
+        !is_main(self.name()) && user.autoload() && user.enabled()
+    }
+
     pub fn database(&self) -> &DatabaseSettings {
         static DEFAULT: DatabaseSettings = DatabaseSettings::new();
 
@@ -389,6 +427,105 @@ pub struct LappUserSettings {
 }
 
 impl LappUserSettings {
+    /// The decisions about a lapp the user has not decided anything about yet: it is enabled and,
+    /// if it requires to, may call its own backend, but has no other permission.
+    pub fn new(manifest: &LappSettings) -> Self {
+        let mut settings = Self::default();
+        settings.application.app.title = manifest.application.title.clone();
+        settings.application.app.description = manifest.application.description.clone();
+        if manifest
+            .required_permissions
+            .front
+            .contains(&FrontPermission::InvokeBack)
+        {
+            settings.allow_front(FrontPermission::InvokeBack);
+        }
+        settings
+    }
+
+    pub fn data_dir(&self, data_root: impl AsRef<Path>, lapp_name: &str) -> PathBuf {
+        let Some(data_dir) = &self.application.data_dir else {
+            return data_root.as_ref().join(lapp_name);
+        };
+
+        if data_dir.is_absolute() {
+            data_dir.clone()
+        } else {
+            data_root.as_ref().join(lapp_name).join(data_dir)
+        }
+    }
+
+    /// The permissions the lapp actually has: the required ones that are allowed or implicit.
+    pub fn effective_permissions(&self, manifest: &LappSettings) -> PermissionsSettings {
+        let required = &manifest.required_permissions;
+        PermissionsSettings {
+            front: self
+                .allowed_permissions
+                .front_iter()
+                .filter(|permission| permission.is_implicit() || required.front.contains(permission))
+                .collect(),
+            back: self
+                .allowed_permissions
+                .back_iter()
+                .filter(|permission| permission.is_implicit() || required.back.contains(permission))
+                .collect(),
+        }
+    }
+
+    /// Applies `query` and returns the part of it that has changed something.
+    ///
+    /// A permission the manifest does not require is not allowed, unless it is implicit.
+    pub fn apply(&mut self, mut query: UpdateQuery, manifest: &LappSettings) -> UpdateQuery {
+        if let Some(enabled) = query.enabled {
+            if self.enabled() != enabled {
+                self.set_enabled(enabled);
+            } else {
+                query.enabled = None;
+            }
+        }
+
+        if let Some(autoload) = query.autoload {
+            if self.autoload() != autoload {
+                self.set_autoload(autoload);
+            } else {
+                query.autoload = None;
+            }
+        }
+
+        if let Some(permission) = query.allow_permission
+            && !((permission.is_implicit() || manifest.required_permissions.contains(permission))
+                && self.allow(permission))
+        {
+            query.allow_permission = None;
+        }
+
+        if let Some(permission) = query.deny_permission
+            && !self.deny(permission)
+        {
+            query.deny_permission = None;
+        }
+
+        query
+    }
+
+    pub fn is_allowed(&self, permission: Permission) -> bool {
+        self.allowed_permissions.contains(permission)
+    }
+
+    pub fn allow(&mut self, permission: Permission) -> bool {
+        match permission {
+            Permission::Front(permission) => self.allow_front(permission),
+            Permission::Back(permission) => self.allow_back(permission),
+        }
+    }
+
+    pub fn deny(&mut self, permission: Permission) -> bool {
+        match permission {
+            Permission::Front(permission) => self.deny_front(permission),
+            Permission::Back(permission) => self.deny_back(permission),
+        }
+    }
+
     #[inline]
     pub fn title(&self) -> &str {
         &self.application.app.title
@@ -486,5 +623,140 @@ impl LappUserSettings {
         } else {
             false
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn lapp_settings(front: &[FrontPermission], back: &[BackPermission]) -> LappSettings {
+        LappSettings {
+            lapp_name: "test".into(),
+            application: ApplicationSettings {
+                title: "Test".into(),
+                description: Some("A test lapp".into()),
+                ..Default::default()
+            },
+            required_permissions: PermissionsSettings {
+                front: front.to_vec(),
+                back: back.to_vec(),
+            },
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn initial_user_settings() {
+        let user = LappUserSettings::new(&lapp_settings(&[FrontPermission::InvokeBack], &[
+            BackPermission::Database,
+        ]));
+        assert!(user.enabled());
+        assert!(!user.autoload());
+        assert_eq!(user.title(), "Test");
+        assert_eq!(user.application.app.description.as_deref(), Some("A test lapp"));
+        assert_eq!(user.allowed_permissions, PermissionsSettings {
+            front: vec![FrontPermission::InvokeBack],
+            back: vec![],
+        });
+
+        let user = LappUserSettings::new(&lapp_settings(&[], &[]));
+        assert_eq!(user.allowed_permissions, PermissionsSettings::default());
+    }
+
+    #[test]
+    fn effective_permissions() {
+        let manifest = lapp_settings(&[FrontPermission::InvokeBack], &[
+            BackPermission::Database,
+            BackPermission::Http,
+            BackPermission::LappsIncoming,
+        ]);
+        let mut user = LappUserSettings::default();
+        user.allow_front(FrontPermission::LappsOutgoing);
+        user.allow_front(FrontPermission::Http);
+        user.allow_back(BackPermission::Database);
+        user.allow_back(BackPermission::Tcp);
+
+        assert_eq!(user.effective_permissions(&manifest), PermissionsSettings {
+            front: vec![FrontPermission::LappsOutgoing],
+            back: vec![BackPermission::Database],
+        });
+    }
+
+    #[test]
+    fn apply_update() {
+        let manifest = lapp_settings(&[FrontPermission::InvokeBack], &[BackPermission::Database]);
+        let mut user = LappUserSettings::new(&manifest);
+
+        let query = UpdateQuery::new("test")
+            .enabled(true)
+            .autoload(true)
+            .allow_permission(BackPermission::Database)
+            .deny_permission(FrontPermission::InvokeBack);
+        assert_eq!(
+            user.apply(query, &manifest),
+            UpdateQuery::new("test")
+                .autoload(true)
+                .allow_permission(BackPermission::Database)
+                .deny_permission(FrontPermission::InvokeBack)
+        );
+        assert!(user.autoload());
+        assert!(user.is_back_allowed(BackPermission::Database));
+        assert!(!user.is_front_allowed(FrontPermission::InvokeBack));
+
+        let query = UpdateQuery::new("test")
+            .allow_permission(BackPermission::Database)
+            .deny_permission(BackPermission::Tcp);
+        assert!(!user.apply(query, &manifest).is_applied());
+    }
+
+    #[test]
+    fn allow_only_required_or_implicit() {
+        let manifest = lapp_settings(&[], &[]);
+        let mut user = LappUserSettings::new(&manifest);
+
+        let updated = user.apply(
+            UpdateQuery::new("test").allow_permission(BackPermission::Http),
+            &manifest,
+        );
+        assert_eq!(updated.allow_permission, None);
+        assert!(!user.is_back_allowed(BackPermission::Http));
+
+        let updated = user.apply(
+            UpdateQuery::new("test").allow_permission(BackPermission::LappsIncoming),
+            &manifest,
+        );
+        assert_eq!(updated.allow_permission, Some(BackPermission::LappsIncoming.into()));
+        assert!(user.is_back_allowed(BackPermission::LappsIncoming));
+    }
+
+    #[test]
+    fn data_dir() {
+        let data_root = Path::new("/lapps/data");
+        let mut user = LappUserSettings::default();
+        assert_eq!(user.data_dir(data_root, "notes"), Path::new("/lapps/data/notes"));
+
+        user.application.data_dir = Some("/home/user/Notes".into());
+        assert_eq!(user.data_dir(data_root, "notes"), Path::new("/home/user/Notes"));
+
+        user.application.data_dir = Some("archive".into());
+        assert_eq!(
+            user.data_dir(data_root, "notes"),
+            Path::new("/lapps/data/notes/archive")
+        );
+    }
+
+    #[test]
+    fn startup_active() {
+        let mut user = LappUserSettings::default();
+        user.set_autoload(true);
+        assert!(lapp_settings(&[], &[]).is_lapp_startup_active(&user));
+
+        let mut launcher = lapp_settings(&[], &[]);
+        launcher.lapp_name = MAIN_NAME.into();
+        assert!(!launcher.is_lapp_startup_active(&user));
+
+        user.set_enabled(false);
+        assert!(!lapp_settings(&[], &[]).is_lapp_startup_active(&user));
     }
 }

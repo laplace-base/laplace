@@ -2603,7 +2603,11 @@ version = "0.1.0"
 dependencies = [
  "config",
  "serde",
+ "serde_json",
+ "serde_with",
  "strum",
+ "thiserror 2.0.21",
+ "toml 1.1.8+spec-1.1.0",
 ]
 
 [[package]]

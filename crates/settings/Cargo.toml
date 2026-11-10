@@ -7,7 +7,17 @@ license.workspace = true
 repository.workspace = true
 description = "The settings lib of the local-firs web-application platform"
 
+[features]
+# Reading and writing the settings files; the host enables it, a wasm frontend does without.
+io = ["dep:config", "dep:thiserror", "dep:toml"]
+
 [dependencies]
-config = { workspace = true }
+config = { workspace = true, optional = true }
 serde = { workspace = true }
+serde_with = { workspace = true }
 strum = { workspace = true }
+thiserror = { workspace = true, optional = true }
+toml = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
