@@ -29,7 +29,7 @@ impl Fixture {
 
     fn settings(&self) -> LappsSettings {
         LappsSettings {
-            path: self.root.join("back"),
+            back_root: self.root.join("back"),
             config_root: self.root.join("config"),
             data_root: self.root.join("data"),
             allowed: None,
@@ -38,7 +38,7 @@ impl Fixture {
 
     fn lapp(&self, name: &str, manifest: &str, back: bool, user_config: Option<&str>) -> &Self {
         let settings = self.settings();
-        let lapp_back_dir = settings.path.join(name);
+        let lapp_back_dir = settings.back_root.join(name);
 
         fs::create_dir_all(&lapp_back_dir).unwrap();
         fs::write(lapp_back_dir.join("manifest.toml"), manifest).unwrap();

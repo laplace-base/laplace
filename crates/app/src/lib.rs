@@ -43,7 +43,7 @@ pub fn run_mobile() {
 
     let mut settings = LaplaceSettings::new(data.config_path()).expect("Settings should be configured");
     settings.platform.frontend_assets_root = data.path.join(&settings.platform.frontend_assets_root);
-    settings.lapps.path = data.path.join(&settings.lapps.path);
+    settings.lapps.back_root = data.path.join(&settings.lapps.back_root);
     settings.lapps.config_root = data.path.join(&settings.lapps.config_root);
     settings.lapps.data_root = data.path.join(&settings.lapps.data_root);
 

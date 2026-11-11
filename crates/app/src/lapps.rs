@@ -29,10 +29,10 @@ impl LappsManager {
         let mut manager = Self::default();
         manager.lapps.insert(lapp::MAIN_NAME.into(), Lapp::launcher());
 
-        let Ok(read_dir) = fs::read_dir(&settings.path).inspect_err(|err| {
+        let Ok(read_dir) = fs::read_dir(&settings.back_root).inspect_err(|err| {
             log::error!(
                 "Failed to read the lapps directory '{}': {err}",
-                settings.path.display()
+                settings.back_root.display()
             )
         }) else {
             return manager;
@@ -42,7 +42,7 @@ impl LappsManager {
             let Ok(entry) = entry.inspect_err(|err| {
                 log::error!(
                     "Failed to read an entry of the lapps directory '{}': {err}",
-                    settings.path.display()
+                    settings.back_root.display()
                 )
             }) else {
                 continue;

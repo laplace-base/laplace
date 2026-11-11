@@ -9,6 +9,6 @@ overwrite_existing_assets = true
 spec = "info"
 
 [lapps]
-path = "lapps/back"
+back_root = "lapps/back"
 config_root = "lapps/config"
 data_root = "lapps/data"

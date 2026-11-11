@@ -90,8 +90,8 @@ const fn default_keep_log_for_days() -> usize {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(default)]
 pub struct LappsSettings {
-    /// Root of the lapp directories with the manifests and the backends.
-    pub path: PathBuf,
+    /// Root of the lapp directories with the manifests and, optionally, the backends.
+    pub back_root: PathBuf,
     /// Root of the user decisions about the lapps, one `<name>.toml` per lapp.
     pub config_root: PathBuf,
     /// Root of the default lapp data directories.
@@ -101,7 +101,7 @@ pub struct LappsSettings {
 
 impl LappsSettings {
     pub fn manifest_path(&self, lapp_name: &str) -> PathBuf {
-        self.path.join(lapp_name).join(MANIFEST_FILE_NAME)
+        self.back_root.join(lapp_name).join(MANIFEST_FILE_NAME)
     }
 
     pub fn user_config_path(&self, lapp_name: &str) -> PathBuf {
@@ -113,7 +113,7 @@ impl Default for LappsSettings {
     fn default() -> Self {
         let lapps = PathBuf::from("lapps");
         Self {
-            path: lapps.join("back"),
+            back_root: lapps.join("back"),
             config_root: lapps.join("config"),
             data_root: lapps.join("data"),
             allowed: None,
