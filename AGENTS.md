@@ -75,9 +75,11 @@ has that directory, with a backend or not.
 CI (`.github/workflows/ci.yml`) runs only `cargo make lint` and `cargo make test`.
 
 Host tests live in `crates/app/tests/` and run real lapp backends through
-`laplace_app_lib::api::http::process_http` — the `handle_http` path without Tauri. They load the
-components from `lapps/back/`, so `cargo make test` first builds and deploys them (`test-backs`);
-a new backend a test needs goes there too. Plain `cargo test` fails on a missing component.
+`laplace_app_lib::api::http::process_http` — the `handle_http` path without Tauri. `tests/lapps.rs`
+builds temporary lapp roots (`Fixture`) with the manifests and user settings a test needs and the
+built echo component copied in as each lapp's backend, so `cargo make test` first builds and deploys
+the components (`test-backs`); a new backend a test needs goes there too. Plain `cargo test` fails on
+a missing component.
 
 **Agents: run builds quietly.** A full build prints hundreds of `Compiling …` lines that only waste
 context, so suppress the progress output and keep only warnings, errors and test results:
@@ -118,7 +120,7 @@ the binary is shipped inside the APK as Android assets and unpacked at startup:
   and falls back for that run to `/sdcard/Android/data/org.laplace/files/data`, which needs no
   permission at all;
 - from there on the mobile path is the desktop one: `Laplace.toml` is read from the data directory
-  and its relative paths are joined with it, the backends are loaded by `LappsManager::load_lapps`
+  and its relative paths are joined with it, the lapps are registered by `LappsManager::load`
   and the frontends are served by `FsStoredAssets`.
 
 Unpacking never destroys what is in the data directory, because the user owns it. It happens on the
@@ -195,7 +197,7 @@ need its own way to unpack the bundle.
   `platform.frontend_assets_root/<name>/`, replaced by builds, unpacking and installs; the user's
   `lapps.config_root/<name>.toml` (decisions: enabled, autoload, granted permissions, data dir) and
   `lapps.data_root/<name>/` (default data dir), which none of those touch. A lapp name is
-  `[a-z0-9-]` (`laplace_settings::lapp::is_valid_name`); `load_lapps` silently skips entries
+  `[a-z0-9-]` (`laplace_settings::lapp::is_valid_name`); `LappsManager::load` silently skips entries
   starting with `.` and logs an error for other invalid names.
 - `examples/<name>/manifest.toml` — per-lapp manifest (`LappSettings`): application metadata,
   `required_permissions.front` / `.back`, database, network, lapp-to-lapp requests. The host only
@@ -205,8 +207,10 @@ need its own way to unpack the bundle.
   Reading and writing these files (`LappSettings::load`, `LappUserSettings::{load, save, update}`)
   and `LaplaceSettings::new` sit behind the `io` feature of `laplace-settings`, which the host
   enables, so that the crate builds for `wasm32-unknown-unknown` without `config`.
-  Note: the host does **not use any of it yet** — `LappsManager::load_lapps` only checks for the
-  manifest to tell a lapp without a backend (skipped quietly) from a broken one.
+  The host registry is `LappsManager` (`crates/app/src/lapps.rs`, docs/architecture.md «Реестр
+  лаппов»): manifest + user settings for every lapp, the launcher built in, backends started at
+  startup for `enabled && autoload` and lazily otherwise, `enabled` / backend / `invoke_back` checked
+  before every call.
 - `crates/app/Tauri.toml` — Tauri config. It is **compiled into the binary** by
   `tauri::generate_context!()`, so changing it requires a rebuild of `laplace-app`. The assets it
   embeds from `frontend-dist` are never used: both `run_desktop` and `run_mobile` replace them with
@@ -258,6 +262,6 @@ branches in the workspace `Cargo.toml`.
   `frontend-dist` to exist; CI creates it empty.
 - `crates/front/src/lapps.rs::list()` returns a hardcoded single `echo` entry; there is no
   command yet to enumerate real lapps from the host.
-- `open_lapp` still panics when the window fails to build; `handle_http` and `load_lapps` report
+- `open_lapp` still panics when the window fails to build; `handle_http` and `LappsManager::load` report
   errors instead (a broken lapp is skipped at startup, a failed request rejects the `invoke`
   promise of the frontend).

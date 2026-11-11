@@ -30,7 +30,7 @@ Laplace — платформа local-first веб-приложений. Поль
 │            ▼                             ▼                                            │
 │   api::laplace::open_lapp       api::http::handle_http ── по метке окна ──┐           │
 │   (WebviewWindowBuilder)                                                  ▼           │
-│                                       State { lapps: Mutex<HashMap<имя, LappState>> } │
+│                                       State { lapps: LappsManager — реестр лаппов }   │
 │                                                    │                                  │
 │   FsStoredAssets ◄── tauri://… (ассеты окон)       ▼ wasmtime (component model)       │
 │   читает platform.frontend_assets_root      echo-back.wasm: export by-client-handler  │
@@ -65,8 +65,10 @@ Laplace — платформа local-first веб-приложений. Поль
 
 1. Элемент с `hx-get="/echo/api/..."` → htmx → `client-router` → `wasm.router(path)`.
 2. `router` → `laplace_front_api::http::handle_http(&Request)` → `invoke("handle_http")`.
-3. `api::http::handle_http(webview_window, state, request)` берёт `webview_window.label()`, находит
-   `LappState`, конвертирует запрос и зовёт `call_handle` под общим `Mutex`.
+3. `api::http::handle_http(webview_window, state, request)` берёт `webview_window.label()` и вне
+   главного потока (`spawn_blocking`) отдаёт запрос `LappsManager::handle_http`: тот находит лапп в
+   реестре, проверяет, что он включён, у него есть back и действует `invoke_back`, при первом
+   запросе поднимает инстанс и зовёт `call_handle` под блокировкой этого лаппа.
 4. Ответ back-а возвращается фронту; тот рендерит HTML-фрагмент, htmx вставляет его в DOM.
 
 ### Окна
@@ -105,10 +107,20 @@ lapps/data/<name>/                  каталог данных лаппа по 
 Имя лаппа — `[a-z0-9-]`: оно одновременно имя каталога и файла, метка окна и (позже) хост origin.
 Каталоги, имя которых начинается с `.`, служебные (замена при обновлении) и пропускаются молча.
 
-Пока хост только раскладывает манифест и по нему отличает лапп без back-а от сломанного; читать
-манифест и `lapps/config/` он начнёт с реестра (план, этап 1.4). На Android корни автора упакованы
-в APK как assets и распаковываются в каталог данных, корни пользователя в пакет не входят (подробно —
-в `AGENTS.md`).
+На Android корни автора упакованы в APK как assets и распаковываются в каталог данных, корни
+пользователя в пакет не входят (подробно — в `AGENTS.md`).
+
+### Реестр лаппов
+
+`LappsManager` (`crates/app/src/lapps.rs`) при старте читает для каждого каталога в `lapps.path`
+манифест и решения пользователя (нет файла — начальные решения). Лапп с нечитаемым манифестом или
+файлом решений пропускается с ошибкой в логе; значения по умолчанию вместо нечитаемого файла не
+подставляются, чтобы следующая запись не затёрла файл пользователя. Лаунчер встроен: он есть в
+реестре без файла манифеста и без back-а, его каталог в `lapps.path` не читается.
+
+Инстансы отделены от реестра: при старте поднимаются только включённые лаппы с `autoload`, остальные —
+при первом запросе. Мапа реестра после старта не меняется, а у каждого лаппа своя блокировка
+инстанса, так что компиляция компонента одного лаппа не задерживает запросы к другим.
 
 ## Чем это отличается от прежних реализаций
 
@@ -121,7 +133,7 @@ lapps/data/<name>/                  каталог данных лаппа по 
 | Оболочка | axum-сервер (HTTP/HTTPS, self-signed TLS) + браузер пользователя | Tauri 2, своё окно на лапп, Android-пакет |
 | Доступ | access token в cookie на путь лаппа | процесс локальный, сети нет; разграничение — по метке окна (пока не проверяется) |
 | Back | core-модуль wasm, ручное ABI: `alloc`/`dealloc`, `WasmSlice`, borsh, макрос `#[http::process]` | WASI-компонент, WIT-мир, `wasmtime::component::bindgen!` / `cargo component` |
-| Исполнение | поток на лапп, актор `LappService` (`truba`), async wasmtime, ленивый запуск + `autoload` | все лаппы грузятся при старте, один `Mutex` на всех, синхронный вызов |
+| Исполнение | поток на лапп, актор `LappService` (`truba`), async wasmtime, ленивый запуск + `autoload` | реестр + ленивый запуск и `autoload`, блокировка на лапп, вызов в `spawn_blocking` |
 | Возможности back-а | FS (preopen `data_dir`), SQLite, исходящий HTTP (reqwest, фильтр методов/хостов), sleep — по разрешениям | только WASI без preopen |
 | Push к клиенту | WebSocket ↔ `route_ws` | нет |
 | P2P | libp2p gossipsub + mDNS, `route_gossipsub` | нет (только настройки) |

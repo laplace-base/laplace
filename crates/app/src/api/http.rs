@@ -1,5 +1,3 @@
-use std::sync::PoisonError;
-
 use laplace_common_api::http;
 use tauri::{AppHandle, Manager as _};
 use wasmtime::component::bindgen;
@@ -101,8 +99,8 @@ mod convert {
 /// Hands the request of a lapp frontend to the backend of the same lapp — the one named by the
 /// label of the calling window.
 ///
-/// A lapp that is not loaded or fails to handle the request is reported by an error, which rejects
-/// the `invoke` promise of the frontend.
+/// A lapp that is not registered, may not be called or fails to handle the request is reported by
+/// an error, which rejects the `invoke` promise of the frontend.
 #[tauri::command]
 pub async fn handle_http(
     app: AppHandle,
@@ -118,18 +116,9 @@ pub async fn handle_http(
 }
 
 pub fn process_http(state: &State, lapp_name: &str, request: http::Request) -> Result<http::Response, String> {
-    let lapp = state
+    let response = state
         .lapps
-        .get(lapp_name)
-        .ok_or_else(|| format!("Lapp '{lapp_name}' is not loaded"))?;
-
-    // A poisoned lock only means that a call has panicked while holding it, which must not make
-    // the lapp unreachable for good: its instance reports by itself whether it is still usable.
-    let mut lapp = lapp.lock().unwrap_or_else(PoisonError::into_inner);
-
-    let response = lapp
-        .http_handle(&convert::into_wit_http_request(request))
-        .map_err(|err| format!("Lapp '{lapp_name}' failed to handle the request: {err:#}"))?;
+        .handle_http(lapp_name, &convert::into_wit_http_request(request))?;
 
     convert::from_wit_http_response(response)
         .map_err(|err| format!("Lapp '{lapp_name}' returned an invalid response: {err}"))
