@@ -162,14 +162,15 @@ fn lapp_without_back_fails() {
 }
 
 #[test]
-fn launcher_is_registered_without_back() {
+fn launcher_is_not_a_registered_lapp() {
     let fixture = Fixture::new("launcher");
+    fixture.lapp(MAIN_NAME, MANIFEST, true, None);
     let state = fixture.state();
 
-    assert!(state.lapps.lapp(MAIN_NAME).is_some());
+    assert!(state.lapps.lapp(MAIN_NAME).is_none());
     assert!(matches!(
         get(&state, MAIN_NAME),
-        Err(HttpError::Lapp(LappError::NoBackend(name))) if name == MAIN_NAME
+        Err(HttpError::Lapp(LappError::NotFound(name))) if name == MAIN_NAME
     ));
 }
 

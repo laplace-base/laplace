@@ -6,7 +6,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError, RwLock, RwLockReadGuard};
 use laplace_settings::laplace::LappsSettings;
 use laplace_settings::lapp::access::{FrontPermission, Permission};
 use laplace_settings::lapp::file::LappSettingsError;
-use laplace_settings::lapp::{self, ApplicationSettings, LappSettings, LappUserSettings};
+use laplace_settings::lapp::{self, LappSettings, LappUserSettings};
 use thiserror::Error;
 use wasmtime::component::{Component, Linker};
 use wasmtime::error::Context;
@@ -59,7 +59,6 @@ impl LappsManager {
     /// A lapp whose manifest or user settings cannot be read is skipped with an error in the log.
     pub fn load(settings: &LappsSettings) -> Self {
         let mut manager = Self::default();
-        manager.lapps.insert(lapp::MAIN_NAME.into(), Lapp::launcher());
 
         let Ok(read_dir) = fs::read_dir(&settings.back_root).inspect_err(|err| {
             log::error!(
@@ -97,7 +96,7 @@ impl LappsManager {
             }
 
             if lapp::is_main(&lapp_name) {
-                log::debug!("Skip '{}': the launcher is built in", lapp_dir.display());
+                log::debug!("Skip '{}': the name is reserved for the launcher", lapp_dir.display());
                 continue;
             }
 
@@ -210,20 +209,6 @@ impl Lapp {
             user_settings,
             back_path.exists().then_some(back_path),
         ))
-    }
-
-    /// The launcher: built into the platform, with no manifest file and no backend.
-    pub fn launcher() -> Self {
-        let manifest_settings = LappSettings {
-            lapp_name: lapp::MAIN_NAME.into(),
-            application: ApplicationSettings {
-                title: "Laplace".into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        let user_settings = LappUserSettings::new(&manifest_settings);
-        Self::new(manifest_settings, user_settings, None)
     }
 
     pub fn user_settings(&self) -> RwLockReadGuard<'_, LappUserSettings> {

@@ -208,9 +208,9 @@ need its own way to unpack the bundle.
   and `LaplaceSettings::new` sit behind the `io` feature of `laplace-settings`, which the host
   enables, so that the crate builds for `wasm32-unknown-unknown` without `config`.
   The host registry is `LappsManager` (`crates/app/src/lapps.rs`, docs/architecture.md «Реестр
-  лаппов»): manifest + user settings for every lapp, the launcher built in, backends started at
-  startup for `enabled && autoload` and lazily otherwise, `enabled` / backend / `invoke_back` checked
-  before every call.
+  лаппов»): manifest + user settings for every lapp, backends started at startup for
+  `enabled && autoload` and lazily otherwise, `enabled` / backend / `invoke_back` checked before every
+  call. The launcher is not in it: it is part of the platform, the name `laplace` is only reserved.
 - `crates/app/Tauri.toml` — Tauri config. It is **compiled into the binary** by
   `tauri::generate_context!()`, so changing it requires a rebuild of `laplace-app`. The assets it
   embeds from `frontend-dist` are never used: both `run_desktop` and `run_mobile` replace them with
