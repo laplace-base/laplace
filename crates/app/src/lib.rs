@@ -2,7 +2,7 @@ use laplace_settings::LaplaceSettings;
 use tauri::{Assets, Wry};
 
 use crate::assets::FsStoredAssets;
-pub use crate::lapps::{Lapp, LappState, LappsManager};
+pub use crate::lapps::{Lapp, LappError, LappResult, LappState, LappsManager};
 
 #[cfg(target_os = "android")]
 pub mod android;

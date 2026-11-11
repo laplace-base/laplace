@@ -1,11 +1,12 @@
 use std::fs;
 use std::path::PathBuf;
 
-use laplace_app_lib::api::http::process_http;
-use laplace_app_lib::{LappsManager, State};
+use laplace_app_lib::api::http::{HttpError, process_http};
+use laplace_app_lib::{LappError, LappsManager, State};
 use laplace_common_api::http::{Request, StatusCode};
 use laplace_settings::laplace::LappsSettings;
 use laplace_settings::lapp::MAIN_NAME;
+use laplace_settings::lapp::access::{FrontPermission, Permission};
 
 const MANIFEST: &str = r#"
 [application]
@@ -71,7 +72,7 @@ impl Drop for Fixture {
     }
 }
 
-fn get(state: &State, lapp_name: &str) -> Result<String, String> {
+fn get(state: &State, lapp_name: &str) -> Result<String, HttpError> {
     let request = Request::get(format!("/{lapp_name}/api/hello")).build().unwrap();
     let response = process_http(state, lapp_name, request)?;
 
@@ -94,7 +95,10 @@ fn request_to_missing_lapp_fails() {
     let fixture = Fixture::new("missing");
     let state = fixture.state();
 
-    assert_eq!(get(&state, "missing").unwrap_err(), "Lapp 'missing' is not found");
+    assert!(matches!(
+        get(&state, "missing"),
+        Err(HttpError::Lapp(LappError::NotFound(name))) if name == "missing"
+    ));
 }
 
 #[test]
@@ -117,7 +121,10 @@ fn disabled_lapp_fails() {
     fixture.lapp("off", MANIFEST, true, Some("[application]\nenabled = false\n"));
     let state = fixture.state();
 
-    assert_eq!(get(&state, "off").unwrap_err(), "Lapp 'off' is not enabled");
+    assert!(matches!(
+        get(&state, "off"),
+        Err(HttpError::Lapp(LappError::NotEnabled(name))) if name == "off"
+    ));
     assert!(!state.lapps.is_running("off"));
 }
 
@@ -148,10 +155,10 @@ fn lapp_without_back_fails() {
     fixture.lapp("front-only", MANIFEST, false, None);
     let state = fixture.state();
 
-    assert_eq!(
-        get(&state, "front-only").unwrap_err(),
-        "Lapp 'front-only' has no backend"
-    );
+    assert!(matches!(
+        get(&state, "front-only"),
+        Err(HttpError::Lapp(LappError::NoBackend(name))) if name == "front-only"
+    ));
 }
 
 #[test]
@@ -160,7 +167,10 @@ fn launcher_is_registered_without_back() {
     let state = fixture.state();
 
     assert!(state.lapps.lapp(MAIN_NAME).is_some());
-    assert_eq!(get(&state, MAIN_NAME).unwrap_err(), "Lapp 'laplace' has no backend");
+    assert!(matches!(
+        get(&state, MAIN_NAME),
+        Err(HttpError::Lapp(LappError::NoBackend(name))) if name == MAIN_NAME
+    ));
 }
 
 #[test]
@@ -171,12 +181,18 @@ fn lapp_without_invoke_back_is_denied() {
         .lapp("unrequired", "[application]\ntitle = \"Test\"\n", true, None);
     let state = fixture.state();
 
-    for name in ["revoked", "unrequired"] {
+    for lapp_name in ["revoked", "unrequired"] {
+        let err = get(&state, lapp_name).unwrap_err();
+        assert!(matches!(
+            &err,
+            HttpError::Lapp(LappError::PermissionDenied { name, permission: Permission::Front(FrontPermission::InvokeBack) })
+                if name == lapp_name
+        ));
         assert_eq!(
-            get(&state, name).unwrap_err(),
-            format!("Lapp '{name}' is denied the permission 'invoke_back'")
+            err.to_string(),
+            format!("Lapp '{lapp_name}' is denied the permission 'invoke_back'")
         );
-        assert!(!state.lapps.is_running(name));
+        assert!(!state.lapps.is_running(lapp_name));
     }
 }
 

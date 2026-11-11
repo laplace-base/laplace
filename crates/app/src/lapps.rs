@@ -4,14 +4,46 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError, RwLock, RwLockReadGuard};
 
 use laplace_settings::laplace::LappsSettings;
-use laplace_settings::lapp::access::FrontPermission;
+use laplace_settings::lapp::access::{FrontPermission, Permission};
+use laplace_settings::lapp::file::LappSettingsError;
 use laplace_settings::lapp::{self, ApplicationSettings, LappSettings, LappUserSettings};
+use thiserror::Error;
 use wasmtime::component::{Component, Linker};
 use wasmtime::error::Context;
 use wasmtime::{Engine, Store};
 
 use crate::api::http::{Http, Request, Response};
 use crate::wasi::WasiStates;
+
+/// The causes go into the messages, as that is all the frontend gets of an error.
+#[derive(Debug, Error)]
+pub enum LappError {
+    #[error("Lapp '{0}' is not found")]
+    NotFound(String),
+
+    #[error("Lapp '{0}' is not enabled")]
+    NotEnabled(String),
+
+    #[error("Lapp '{0}' has no backend")]
+    NoBackend(String),
+
+    #[error("Lapp '{name}' is denied the permission '{}'", permission.as_str())]
+    PermissionDenied { name: String, permission: Permission },
+
+    #[error("Failed to read the manifest '{}': {error}", path.display())]
+    Manifest { path: PathBuf, error: LappSettingsError },
+
+    #[error("Failed to read the user settings '{}': {error}", path.display())]
+    UserSettings { path: PathBuf, error: LappSettingsError },
+
+    #[error("Failed to start lapp '{name}': {error:#}")]
+    Start { name: String, error: anyhow::Error },
+
+    #[error("Lapp '{name}' failed to handle the request: {error:#}")]
+    Handle { name: String, error: wasmtime::Error },
+}
+
+pub type LappResult<T> = Result<T, LappError>;
 
 /// The registry of the lapps: what their manifests require and what the user has decided, apart
 /// from the instances of their backends, which are started on demand.
@@ -81,7 +113,7 @@ impl LappsManager {
             }
 
             let Ok(lapp) = Lapp::read(settings, &lapp_name, &lapp_dir)
-                .inspect_err(|err| log::error!("Failed to register lapp '{lapp_name}': {err:#}"))
+                .inspect_err(|err| log::error!("Failed to register lapp '{lapp_name}': {err}"))
             else {
                 continue;
             };
@@ -111,36 +143,38 @@ impl LappsManager {
     }
 
     /// Hands a request of the frontend of the lapp `name` to its backend, starting it if needed.
-    pub fn handle_http(&self, name: &str, request: &Request) -> Result<Response, String> {
-        let lapp = self.lapp(name).ok_or_else(|| format!("Lapp '{name}' is not found"))?;
+    pub fn handle_http(&self, name: &str, request: &Request) -> LappResult<Response> {
+        let lapp = self.lapp(name).ok_or_else(|| LappError::NotFound(name.into()))?;
         lapp.check_invoke_back(name)?;
 
         let mut instance = self.instance(name, lapp)?;
         let state = instance.as_mut().expect("the instance was started");
 
-        state
-            .http_handle(request)
-            .map_err(|err| format!("Lapp '{name}' failed to handle the request: {err:#}"))
+        state.http_handle(request).map_err(|error| LappError::Handle {
+            name: name.into(),
+            error,
+        })
     }
 
     // The instance of the lapp backend, started if it is not running yet.
-    fn instance<'a>(&self, name: &str, lapp: &'a Lapp) -> Result<MutexGuard<'a, Option<LappState>>, String> {
-        let back_path = lapp.back_path.as_deref().ok_or_else(|| no_backend(name))?;
+    fn instance<'a>(&self, name: &str, lapp: &'a Lapp) -> LappResult<MutexGuard<'a, Option<LappState>>> {
+        let back_path = lapp
+            .back_path
+            .as_deref()
+            .ok_or_else(|| LappError::NoBackend(name.into()))?;
 
         // Only this lapp waits while its component compiles.
         let mut instance = lapp.lock_instance();
         if instance.is_none() {
             log::debug!("Start lapp '{name}'");
-            let state = LappState::load(&self.engine, back_path, name)
-                .map_err(|err| format!("Failed to start lapp '{name}': {err:#}"))?;
+            let state = LappState::load(&self.engine, back_path, name).map_err(|error| LappError::Start {
+                name: name.into(),
+                error,
+            })?;
             *instance = Some(state);
         }
         Ok(instance)
     }
-}
-
-fn no_backend(name: &str) -> String {
-    format!("Lapp '{name}' has no backend")
 }
 
 /// A registered lapp.
@@ -161,14 +195,13 @@ impl Lapp {
         }
     }
 
-    pub fn read(settings: &LappsSettings, name: &str, lapp_dir: &Path) -> anyhow::Result<Self> {
-        let manifest_path = settings.manifest_path(name);
-        let manifest_settings = LappSettings::load(name, &manifest_path)
-            .with_context(|| format!("Failed to read the manifest '{}'", manifest_path.display()))?;
+    pub fn read(settings: &LappsSettings, name: &str, lapp_dir: &Path) -> LappResult<Self> {
+        let path = settings.manifest_path(name);
+        let manifest_settings = LappSettings::load(name, &path).map_err(|error| LappError::Manifest { path, error })?;
 
-        let user_config_path = settings.user_config_path(name);
-        let user_settings = LappUserSettings::load(&user_config_path, &manifest_settings)
-            .with_context(|| format!("Failed to read the user settings '{}'", user_config_path.display()))?;
+        let path = settings.user_config_path(name);
+        let user_settings = LappUserSettings::load(&path, &manifest_settings)
+            .map_err(|error| LappError::UserSettings { path, error })?;
 
         let back_path = LappState::back_path(lapp_dir, name);
 
@@ -202,15 +235,15 @@ impl Lapp {
     }
 
     // Whether the frontend of the lapp may call its backend.
-    fn check_invoke_back(&self, name: &str) -> Result<(), String> {
+    fn check_invoke_back(&self, name: &str) -> LappResult<()> {
         let user_settings = self.user_settings();
 
         if !user_settings.enabled() {
-            return Err(format!("Lapp '{name}' is not enabled"));
+            return Err(LappError::NotEnabled(name.into()));
         }
 
         if self.back_path.is_none() {
-            return Err(no_backend(name));
+            return Err(LappError::NoBackend(name.into()));
         }
 
         if !user_settings
@@ -218,10 +251,10 @@ impl Lapp {
             .front
             .contains(&FrontPermission::InvokeBack)
         {
-            return Err(format!(
-                "Lapp '{name}' is denied the permission '{}'",
-                FrontPermission::InvokeBack.as_str()
-            ));
+            return Err(LappError::PermissionDenied {
+                name: name.into(),
+                permission: FrontPermission::InvokeBack.into(),
+            });
         }
         Ok(())
     }

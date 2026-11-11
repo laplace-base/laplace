@@ -1,9 +1,11 @@
 use laplace_common_api::http;
 use tauri::{AppHandle, Manager as _};
+use thiserror::Error;
 use wasmtime::component::bindgen;
 
 pub use self::exports::laplace::http::types::{Header, Method, Request, Response, Uri};
 use crate::State;
+use crate::lapps::LappError;
 
 bindgen!({
     path: "../../wit/http.wit",
@@ -96,6 +98,18 @@ mod convert {
     }
 }
 
+#[derive(Debug, Error)]
+pub enum HttpError {
+    #[error(transparent)]
+    Lapp(#[from] LappError),
+
+    #[error("Lapp '{name}' returned an invalid response: {error}")]
+    InvalidResponse {
+        name: String,
+        error: http::status::InvalidStatusCode,
+    },
+}
+
 /// Hands the request of a lapp frontend to the backend of the same lapp — the one named by the
 /// label of the calling window.
 ///
@@ -111,15 +125,18 @@ pub async fn handle_http(
 
     tauri::async_runtime::spawn_blocking(move || process_http(&app.state::<State>(), &lapp_name, request))
         .await
-        .unwrap_or_else(|err| Err(format!("The request handling task has failed: {err}")))
+        .map_err(|err| format!("The request handling task has failed: {err}"))
+        .and_then(|result| result.map_err(|err| err.to_string()))
         .inspect_err(|err| log::error!("{err}"))
 }
 
-pub fn process_http(state: &State, lapp_name: &str, request: http::Request) -> Result<http::Response, String> {
+pub fn process_http(state: &State, lapp_name: &str, request: http::Request) -> Result<http::Response, HttpError> {
     let response = state
         .lapps
         .handle_http(lapp_name, &convert::into_wit_http_request(request))?;
 
-    convert::from_wit_http_response(response)
-        .map_err(|err| format!("Lapp '{lapp_name}' returned an invalid response: {err}"))
+    convert::from_wit_http_response(response).map_err(|error| HttpError::InvalidResponse {
+        name: lapp_name.into(),
+        error,
+    })
 }

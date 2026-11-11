@@ -56,6 +56,13 @@ pub enum Permission {
 }
 
 impl Permission {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Front(permission) => permission.as_str(),
+            Self::Back(permission) => permission.as_str(),
+        }
+    }
+
     pub fn is_implicit(&self) -> bool {
         match self {
             Self::Front(permission) => permission.is_implicit(),
