@@ -121,7 +121,7 @@ the binary is shipped inside the APK as Android assets and unpacked at startup:
   permission at all;
 - from there on the mobile path is the desktop one: `Laplace.toml` is read from the data directory
   and its relative paths are joined with it, the lapps are registered by `LappsManager::load`
-  and the frontends are served by `FsStoredAssets`.
+  and the frontends are served by `FsStoredAssets` through the lapp schemes.
 
 Unpacking never destroys what is in the data directory, because the user owns it. It happens on the
 first start after the package has been installed or updated and then never again
@@ -213,11 +213,14 @@ need its own way to unpack the bundle.
   call. The launcher is not in it: it is part of the platform, the name `laplace` is only reserved.
 - `crates/app/Tauri.toml` — Tauri config. It is **compiled into the binary** by
   `tauri::generate_context!()`, so changing it requires a rebuild of `laplace-app`. The assets it
-  embeds from `frontend-dist` are never used: both `run_desktop` and `run_mobile` replace them with
-  `FsStoredAssets`, which reads from `platform.frontend_assets_root` at runtime and serves nothing
-  outside of it. A lapp window additionally gets only `/<name>/**` and the shared `/vendor/**`: the
-  `on_web_resource_request` hook of `open_lapp` answers anything else with `403`
-  (`assets::is_asset_allowed`). The names `laplace` and `vendor` are reserved (`lapp::is_reserved`).
+  embeds from `frontend-dist` are never used: `start` replaces them with none (`assets::NoAssets`), so
+  `tauri://` serves nothing. Every window, the launcher included, is on a URI scheme of its own,
+  `lapp-<name>://localhost` (`assets::lapp_url`; the launcher URL in `Tauri.toml` is the same), which
+  gives each lapp its own origin and web storage on every platform. `start` registers the scheme of
+  every registered lapp and of the launcher; its handler (`FsStoredAssets::respond`) reads from
+  `platform.frontend_assets_root` and answers only the window of that lapp, only `/<name>/**` and the
+  shared `/vendor/**`, never outside of the root. A lapp registered after startup would have no scheme
+  until a restart. The names `laplace` and `vendor` are reserved (`lapp::is_reserved`).
 - `crates/app/gen/android/app/src/main/assets/data/Laplace.toml` — the same platform config for the
   Android package, with paths relative to the data directory. It is unpacked once and never
   overwritten afterwards, so on a device the file the app reads is
@@ -259,7 +262,7 @@ branches in the workspace `Cargo.toml`.
 - `NOTES.md` (Russian, gitignored) tracks open design questions — mobile bootstrap flow, README
   structure.
 - The lapp frontends are packed into the APK twice: `tauri::generate_context!` embeds
-  `frontend-dist` (`lapps/front/`) into the binary even though `FsStoredAssets` always replaces it,
+  `frontend-dist` (`lapps/front/`) into the binary even though it is never served,
   and `android-assets` ships the same files as package assets.
 - `laplace-app` does not compile while `lapps/front/` is missing — `generate_context!` requires
   `frontend-dist` to exist; CI creates it empty.

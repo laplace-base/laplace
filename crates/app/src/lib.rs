@@ -1,7 +1,9 @@
-use laplace_settings::LaplaceSettings;
-use tauri::{Assets, Wry};
+use std::sync::Arc;
 
-use crate::assets::FsStoredAssets;
+use laplace_settings::LaplaceSettings;
+use laplace_settings::lapp::MAIN_NAME;
+
+use crate::assets::{FsStoredAssets, NoAssets};
 pub use crate::lapps::{Lapp, LappError, LappResult, LappState, LappsManager};
 
 #[cfg(target_os = "android")]
@@ -24,7 +26,7 @@ pub fn run_desktop(settings: LaplaceSettings) {
     start(
         settings.platform.lang,
         lapps,
-        Box::new(FsStoredAssets::new(settings.platform.frontend_assets_root)),
+        FsStoredAssets::new(settings.platform.frontend_assets_root),
     )
 }
 
@@ -64,18 +66,40 @@ pub fn run_mobile() {
     start(
         settings.platform.lang,
         lapps,
-        Box::new(FsStoredAssets::new(settings.platform.frontend_assets_root)),
+        FsStoredAssets::new(settings.platform.frontend_assets_root),
     )
 }
 
 /// Builds and runs the Tauri application.
 ///
-/// `assets` replaces the assets embedded at compile time by [`tauri::generate_context`].
-fn start(lang: String, lapps: LappsManager, assets: Box<dyn Assets<Wry>>) {
+/// The windows get their frontends from `assets` through the scheme of their lapp
+/// ([`assets::lapp_scheme`]); the assets embedded at compile time by [`tauri::generate_context`] are
+/// replaced with none.
+fn start(lang: String, lapps: LappsManager, assets: FsStoredAssets) {
     let mut context = tauri::generate_context!();
-    context.set_assets(assets);
+    context.set_assets(Box::new(NoAssets));
 
-    tauri::Builder::default()
+    let assets = Arc::new(assets);
+    let mut builder = tauri::Builder::default();
+
+    for lapp_name in lapps.names().chain([MAIN_NAME]) {
+        let lapp_name = lapp_name.to_owned();
+        let assets = assets.clone();
+
+        builder = builder.register_asynchronous_uri_scheme_protocol(
+            assets::lapp_scheme(&lapp_name),
+            move |ctx, request, responder| {
+                let (lapp_name, assets) = (lapp_name.clone(), assets.clone());
+                let webview_label = ctx.webview_label().to_owned();
+
+                tauri::async_runtime::spawn_blocking(move || {
+                    responder.respond(assets.respond(&lapp_name, &webview_label, &request))
+                });
+            },
+        );
+    }
+
+    builder
         .manage(State { lang, lapps })
         .invoke_handler(tauri::generate_handler![
             api::laplace::get_lang,

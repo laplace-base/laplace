@@ -32,7 +32,7 @@ Laplace — платформа local-first веб-приложений. Поль
 │   (WebviewWindowBuilder)                                                  ▼           │
 │                                       State { lapps: LappsManager — реестр лаппов }   │
 │                                                    │                                  │
-│   FsStoredAssets ◄── tauri://… (ассеты окон)       ▼ wasmtime (component model)       │
+│   FsStoredAssets ◄── lapp-<name>://… (ассеты окна) ▼ wasmtime (component model)       │
 │   читает platform.frontend_assets_root      echo-back.wasm: export by-client-handler  │
 │                                                                                       │
 └───────────────────────────────────────────────────────────────────────────────────────┘
@@ -85,9 +85,17 @@ Laplace — платформа local-first веб-приложений. Поль
 из любого другого окна; `handle_http` и `get_lang` доступны всем. Tauri ACL не используется: он
 выбирает окна по той же метке, а команды с нелокального origin Tauri отклоняет и без него.
 
-Ассеты всех окон отдаёт встроенная схема Tauri из `FsStoredAssets`, который не отдаёт ничего за
-пределами `frontend_assets_root`. Окну лаппа `open_lapp` ставит хук `on_web_resource_request`: всё,
-кроме `/<name>/**` и общих `/vendor/**`, получает `403` (`assets::is_asset_allowed`). `window.open`
+Каждое окно, и лаунчер тоже, открыто на своей схеме `lapp-<name>://localhost/<name>/index.html`
+(`assets::lapp_url`). Отдельная схема даёт лаппу отдельный origin, а с ним и своё хранилище WebView,
+на всех платформах: на Windows и Android своя схема превращается в `http://<схема>.localhost`, и
+различить лаппы там может только схема — хост Tauri требует `localhost`, иначе считает origin
+удалённым и отклоняет IPC. Схемы всех лаппов реестра и лаунчера регистрирует `start`; обработчик
+(`FsStoredAssets::respond`) по метке окна из запроса отвечает только окну своего лаппа и только
+`/<name>/**` и общими `/vendor/**`, ничего за пределами `frontend_assets_root`; всё прочее — `403`.
+Встроенная схема `tauri://` не отдаёт ничего (`NoAssets`). Хук `on_web_resource_request` для этого не
+годится: на Linux схемы регистрируются на общем `WebContext`, и `tauri://` получает хук первого окна —
+лаунчера. Лапп, зарегистрированный после старта (этап 7), получит схему только после перезапуска,
+если не регистрировать её через плагин во время работы. `window.open`
 из окна лаппа запрещён (`on_new_window`): открытое так окно не было бы ни отфильтровано, ни привязано
 к лаппу. Имена `laplace` и `vendor` зарезервированы платформой (`lapp::is_reserved`) и лаппам не
 даются.

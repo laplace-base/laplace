@@ -1,17 +1,14 @@
-use std::borrow::Cow;
 use std::fmt::Display;
-use std::path::Path;
 
 use laplace_settings::lapp::update::UpdateQuery;
 use laplace_settings::lapp::{self, LappInfo};
-use tauri::http::StatusCode;
 use tauri::webview::{DownloadEvent, NewWindowResponse, PageLoadEvent};
 use tauri::{AppHandle, Manager as _, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 use crate::State;
 #[cfg(target_os = "android")]
 use crate::android;
-use crate::assets::is_asset_allowed;
+use crate::assets::lapp_url;
 use crate::lapps::{LappError, LappResult};
 
 #[tauri::command]
@@ -81,7 +78,7 @@ pub async fn open_lapp(
         return Ok(());
     }
 
-    let builder = WebviewWindowBuilder::new(&handle, name, WebviewUrl::App(Path::new(name).join("index.html")))
+    let builder = WebviewWindowBuilder::new(&handle, name, WebviewUrl::CustomProtocol(lapp_url(name)))
         .title(title)
         .on_download(|_view, event| {
             match event {
@@ -106,19 +103,6 @@ pub async fn open_lapp(
         .on_navigation(|url| {
             log::debug!("Navigation: {url}");
             true
-        })
-        .on_web_resource_request({
-            let lapp_name = name.to_owned();
-
-            move |request, response| {
-                log::debug!("Request: {}", request.uri());
-
-                if !is_asset_allowed(&lapp_name, request.uri().path()) {
-                    log::warn!("Lapp '{lapp_name}' is denied the asset '{}'", request.uri());
-                    *response.status_mut() = StatusCode::FORBIDDEN;
-                    *response.body_mut() = Cow::Borrowed(&[]);
-                }
-            }
         })
         // A window opened by the lapp would be neither filtered nor routed to it.
         .on_new_window({

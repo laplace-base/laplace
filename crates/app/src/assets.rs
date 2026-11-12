@@ -1,17 +1,38 @@
+//! The frontend assets of the windows.
+//!
+//! Every lapp, the launcher included, is served by a URI scheme of its own, `lapp-<name>://localhost`:
+//! that gives each its own origin, and so its own web storage, on every platform — on Windows and
+//! Android a custom scheme becomes `http://<scheme>.localhost`, so the scheme is the only part of the
+//! URL that can tell the lapps apart. The built-in `tauri://` scheme serves nothing ([`NoAssets`]).
+
 use std::borrow::Cow;
-use std::fs::{self, DirEntry};
-use std::io;
+use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 use laplace_settings::lapp::VENDOR_NAME;
+use tauri::http::{Request, Response, StatusCode, header};
 use tauri::utils::assets::{AssetKey, AssetsIter, CspHash};
-use tauri::{Assets, Runtime};
+use tauri::utils::mime_type::MimeType;
+use tauri::{Assets, Runtime, Url};
+
+/// The URI scheme that serves the frontend of the lapp `lapp_name`.
+pub fn lapp_scheme(lapp_name: &str) -> String {
+    // A scheme has to start with a letter, a lapp name may start with a digit.
+    format!("lapp-{lapp_name}")
+}
+
+/// The URL of the start page of the lapp `lapp_name`.
+pub fn lapp_url(lapp_name: &str) -> Url {
+    Url::parse(&format!(
+        "{}://localhost/{lapp_name}/index.html",
+        lapp_scheme(lapp_name)
+    ))
+    .expect("a lapp name makes a valid URL")
+}
 
 /// Whether the window of the lapp `lapp_name` may load the asset at the URL `path`: its own
 /// frontend or the shared `vendor` assets, and nothing outside of them.
-pub fn is_asset_allowed(lapp_name: &str, path: &str) -> bool {
-    // Decoded as Tauri does before it looks the asset up, so that `%2F` cannot hide a `..`.
-    let path = percent_encoding::percent_decode_str(path).decode_utf8_lossy();
+fn is_asset_allowed(lapp_name: &str, path: &str) -> bool {
     let Some(path) = path.strip_prefix('/') else {
         return false;
     };
@@ -19,22 +40,18 @@ pub fn is_asset_allowed(lapp_name: &str, path: &str) -> bool {
     let first = components.next();
 
     matches!(first, Some(Component::Normal(first)) if first == lapp_name || first == VENDOR_NAME)
-        && components.all(is_normal_component)
+        && components.all(is_component_normal)
 }
 
-/// The path of `key` inside `root`, if the key does not lead out of it.
-fn asset_path(root: &Path, key: &str) -> Option<PathBuf> {
-    let relative = Path::new(key.strip_prefix('/').unwrap_or(key));
-    relative
-        .components()
-        .all(is_normal_component)
-        .then(|| root.join(relative))
-}
-
-fn is_normal_component(component: Component) -> bool {
+fn is_component_normal(component: Component) -> bool {
     matches!(component, Component::Normal(_))
 }
 
+fn decode(path: &str) -> Cow<'_, str> {
+    percent_encoding::percent_decode_str(path).decode_utf8_lossy()
+}
+
+/// The frontend files in `platform.frontend_assets_root`.
 pub struct FsStoredAssets {
     root: PathBuf,
 }
@@ -43,102 +60,67 @@ impl FsStoredAssets {
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self { root: root.into() }
     }
-}
 
-impl<R: Runtime> Assets<R> for FsStoredAssets {
-    fn get(&self, key: &AssetKey) -> Option<Cow<'_, [u8]>> {
-        let Some(path) = asset_path(&self.root, key.as_ref()) else {
-            log::warn!("Asset '{}' is rejected: it leads out of the assets root", key.as_ref());
-            return None;
+    /// The response of the scheme of the lapp `lapp_name` to a request of the window `webview_label`.
+    ///
+    /// Only the window of the lapp itself gets anything, and only what [`is_asset_allowed`] lets it.
+    pub fn respond(&self, lapp_name: &str, webview_label: &str, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
+        let path = request.uri().path();
+        let decoded_path = decode(path);
+        if webview_label != lapp_name || !is_asset_allowed(lapp_name, &decoded_path) {
+            log::warn!("Window '{webview_label}' is denied the asset '{}'", request.uri());
+            return status(StatusCode::FORBIDDEN);
+        }
+
+        let Some(file_path) = self.file_path(&decoded_path) else {
+            return status(StatusCode::FORBIDDEN);
         };
 
-        if path.exists() {
-            Some(Cow::Owned(
-                std::fs::read(&path)
-                    .inspect_err(|err| log::error!("Error while reading file '{}': {err}", path.display()))
-                    .ok()?,
-            ))
-        } else {
-            log::warn!(
-                "Asset '{}' not found: filе '{}' is not exists",
-                key.as_ref(),
-                path.display()
-            );
-            None
+        match fs::read(&file_path) {
+            Ok(content) => Response::builder()
+                .header(header::CONTENT_TYPE, MimeType::parse(&content, path))
+                .body(content)
+                .expect("the response is valid"),
+            Err(err) => {
+                log::warn!("Asset '{path}' is not read from '{}': {err}", file_path.display());
+                status(StatusCode::NOT_FOUND)
+            },
         }
     }
 
-    fn iter(&self) -> Box<AssetsIter<'_>> {
-        let mut files = Vec::new();
-        if let Err(err) = visit_dirs(self.root.as_path(), &mut files) {
-            log::error!("Error while visit directory '{}': {err}", self.root.display());
-        }
+    /// The file of the URL `path`, if the path does not lead out of the root.
+    fn file_path(&self, path: &str) -> Option<PathBuf> {
+        let relative = Path::new(path.strip_prefix('/').unwrap_or(path));
+        relative
+            .components()
+            .all(is_component_normal)
+            .then(|| self.root.join(relative))
+    }
+}
 
-        Box::new(FsStoredAssetsIter::new(&self.root, files))
+fn status(status: StatusCode) -> Response<Vec<u8>> {
+    Response::builder()
+        .status(status)
+        .body(Vec::new())
+        .expect("the response is valid")
+}
+
+/// The assets of the built-in `tauri://` scheme: none, since every window is on its lapp scheme.
+pub struct NoAssets;
+
+impl<R: Runtime> Assets<R> for NoAssets {
+    fn get(&self, key: &AssetKey) -> Option<Cow<'_, [u8]>> {
+        log::warn!("Asset '{}' is requested through the tauri scheme", key.as_ref());
+        None
+    }
+
+    fn iter(&self) -> Box<AssetsIter<'_>> {
+        Box::new(std::iter::empty())
     }
 
     fn csp_hashes(&self, _html_path: &AssetKey) -> Box<dyn Iterator<Item = CspHash<'_>> + '_> {
         Box::new(std::iter::empty())
     }
-}
-
-pub struct FsStoredAssetsIter<'a> {
-    root: &'a Path,
-    files: Vec<DirEntry>,
-    index: usize,
-}
-
-impl<'a> FsStoredAssetsIter<'a> {
-    pub fn new(root: &'a Path, files: Vec<DirEntry>) -> Self {
-        Self { root, files, index: 0 }
-    }
-}
-
-impl<'a> Iterator for FsStoredAssetsIter<'a> {
-    type Item = (Cow<'a, str>, Cow<'a, [u8]>);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.files.get(self.index).map(|entry| {
-            self.index += 1;
-            let path = entry
-                .path()
-                .strip_prefix(self.root)
-                .map(|path| path.to_path_buf())
-                .unwrap_or_else(|err| {
-                    let path = entry.path();
-                    log::error!(
-                        "Error while stripping path '{path}' with root '{root}': {err}",
-                        path = path.display(),
-                        root = self.root.display(),
-                    );
-                    path
-                });
-            (
-                Cow::Owned(path.to_string_lossy().to_string()),
-                Cow::Owned(
-                    std::fs::read(entry.path())
-                        .inspect_err(|err| log::error!("Error while reading file '{}': {err}", entry.path().display()))
-                        .ok()
-                        .unwrap_or_default(),
-                ),
-            )
-        })
-    }
-}
-
-fn visit_dirs(dir: &Path, entries: &mut Vec<DirEntry>) -> io::Result<()> {
-    if dir.is_dir() {
-        for entry in fs::read_dir(dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.is_dir() {
-                visit_dirs(&path, entries)?;
-            } else {
-                entries.push(entry);
-            }
-        }
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -169,12 +151,18 @@ mod tests {
             "",
             "/echo%2F..%2F..%2FLaplace.toml",
         ] {
-            assert!(!is_asset_allowed("echo", path), "{path}");
+            assert!(!is_asset_allowed("echo", &decode(path)), "{path}");
         }
     }
 
     #[test]
-    fn assets_do_not_lead_out_of_the_root() {
+    fn lapp_url_is_on_its_own_scheme() {
+        assert_eq!(lapp_url("echo").as_str(), "lapp-echo://localhost/echo/index.html");
+        assert_eq!(lapp_url("2048").scheme(), "lapp-2048");
+    }
+
+    #[test]
+    fn scheme_serves_only_the_window_of_its_lapp() {
         let dir = temp_dir("not_lead_out");
         let assets_root = dir.join("front");
         let lapp_assets_root = assets_root.join("echo");
@@ -184,12 +172,29 @@ mod tests {
         fs::write(dir.join("secret.toml"), "secret").unwrap();
         let assets = FsStoredAssets::new(&assets_root);
 
-        let get = |key: &str| {
-            <FsStoredAssets as Assets<tauri::Wry>>::get(&assets, &AssetKey::from(key)).map(|data| data.into_owned())
+        let get = |window: &str, uri: &str| {
+            let request = Request::get(uri).body(Vec::new()).unwrap();
+            assets.respond("echo", window, &request)
         };
-        assert_eq!(get("/echo/index.html").as_deref(), Some(b"echo".as_slice()));
-        assert_eq!(get("/../secret.toml"), None);
-        assert_eq!(get("/echo/../../secret.toml"), None);
+
+        let response = get("echo", "lapp-echo://localhost/echo/index.html");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.body(), b"echo");
+        assert_eq!(response.headers()[header::CONTENT_TYPE], "text/html");
+
+        assert_eq!(
+            get("notes", "lapp-echo://localhost/echo/index.html").status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            get("echo", "lapp-echo://localhost/..%2Fsecret.toml").status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            get("echo", "lapp-echo://localhost/echo/missing.js").status(),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(FsStoredAssets::new(&assets_root).file_path("/../secret.toml"), None);
 
         fs::remove_dir_all(dir).unwrap();
     }

@@ -27,6 +27,7 @@ with-global-tauri = true
 # The launcher window: the label is the name that the launcher-only commands check.
 label = "laplace"
 title = "Laplace"
-url = "laplace/index.html"
+# The launcher, like every lapp, is served by its own scheme (`assets::lapp_url`).
+url = "lapp-laplace://localhost/laplace/index.html"
 width = 1200
 height = 800

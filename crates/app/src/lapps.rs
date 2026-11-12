@@ -143,6 +143,10 @@ impl LappsManager {
         self.lapps.get(name)
     }
 
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        self.lapps.keys().map(String::as_str)
+    }
+
     /// Whether the backend of the lapp `name` has an instance.
     pub fn is_running(&self, name: &str) -> bool {
         self.lapp(name).is_some_and(Lapp::is_running)
