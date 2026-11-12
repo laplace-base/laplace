@@ -303,3 +303,23 @@ fn update_without_changes_keeps_everything() {
         Err(LappError::NotFound(_))
     ));
 }
+
+#[test]
+fn window_title_falls_back_to_the_manifest_and_the_name() {
+    let fixture = Fixture::new("title");
+    fixture
+        .lapp("renamed", MANIFEST, true, Some("[application]\ntitle = \"Mine\"\n"))
+        .lapp(
+            "untitled-user",
+            MANIFEST,
+            true,
+            Some("[application]\nautoload = false\n"),
+        )
+        .lapp("untitled", "[application]\n", true, None);
+    let state = fixture.state();
+
+    let title = |name| state.lapps.check_open(name).unwrap().title(name);
+    assert_eq!(title("renamed"), "Mine");
+    assert_eq!(title("untitled-user"), "Test");
+    assert_eq!(title("untitled"), "untitled");
+}

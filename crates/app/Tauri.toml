@@ -24,6 +24,8 @@ icon = [
 with-global-tauri = true
 
 [[app.windows]]
+# The launcher window: the label is the name that the launcher-only commands check.
+label = "laplace"
 title = "Laplace"
 url = "laplace/index.html"
 width = 1200

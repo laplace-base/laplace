@@ -262,4 +262,6 @@ branches in the workspace `Cargo.toml`.
   `frontend-dist` to exist; CI creates it empty.
 - `crates/front/src/lapps.rs::list()` returns a hardcoded single `echo` entry: the host commands
   `get_lapps` and `update_lapp` exist, but the launcher does not call them yet (stage 6 of the plan).
-- Until the window ACL (task 26-11-10) every window may call every command, `update_lapp` included.
+- Commands are restricted by hand, not by the Tauri ACL: every platform management command lives in
+  `crates/app/src/api/laplace.rs` and calls `require_launcher` first — the launcher window is the one
+  labelled `laplace` in `Tauri.toml`. A new management command must do the same.

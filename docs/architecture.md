@@ -74,8 +74,16 @@ Laplace — платформа local-first веб-приложений. Поль
 ### Окна
 
 `open_lapp(name)` отказывает лаппу, которого нет в реестре или который выключен, и строит
-`WebviewWindowBuilder` с меткой `name` и URL `<name>/index.html`; уже открытый лапп поднимается, а не
-открывается второй раз. Команда асинхронная: в синхронной команде сборка окна на Windows зависает. На Android окно — activity: лаунчер — `MainActivity`, каждый лапп — `LappActivity` в отдельной задаче (`documentLaunchMode="always"`).
+`WebviewWindowBuilder` с меткой `name`, URL `<name>/index.html` и заголовком — названием лаппа (из
+решений пользователя, иначе из манифеста, иначе имя); уже открытый лапп поднимается, а не
+открывается второй раз. Команда асинхронная: в синхронной команде сборка окна на Windows зависает.
+На Android окно — activity: лаунчер — `MainActivity`, каждый лапп — `LappActivity` в отдельной задаче
+(`documentLaunchMode="always"`).
+
+Окно лаунчера создаётся из `Tauri.toml` с меткой `laplace`. Команды управления платформой
+(`get_lapps`, `update_lapp`, `open_lapp`) первым делом вызывают `require_launcher` и отклоняют вызов
+из любого другого окна; `handle_http` и `get_lang` доступны всем. Tauri ACL не используется: он
+выбирает окна по той же метке, а команды с нелокального origin Tauri отклоняет и без него.
 
 ### Раскладка на диске
 
@@ -138,7 +146,7 @@ lapps/data/<name>/                  каталог данных лаппа по 
 | Аспект | Прежний `laplace_server` | Текущий `laplace-app` |
 | --- | --- | --- |
 | Оболочка | axum-сервер (HTTP/HTTPS, self-signed TLS) + браузер пользователя | Tauri 2, своё окно на лапп, Android-пакет |
-| Доступ | access token в cookie на путь лаппа | процесс локальный, сети нет; разграничение — по метке окна (пока не проверяется) |
+| Доступ | access token в cookie на путь лаппа | процесс локальный, сети нет; разграничение — по метке окна: команды управления принимаются только от окна `laplace` |
 | Back | core-модуль wasm, ручное ABI: `alloc`/`dealloc`, `WasmSlice`, borsh, макрос `#[http::process]` | WASI-компонент, WIT-мир, `wasmtime::component::bindgen!` / `cargo component` |
 | Исполнение | поток на лапп, актор `LappService` (`truba`), async wasmtime, ленивый запуск + `autoload` | реестр + ленивый запуск и `autoload`, блокировка на лапп, вызов в `spawn_blocking` |
 | Возможности back-а | FS (preopen `data_dir`), SQLite, исходящий HTTP (reqwest, фильтр методов/хостов), sleep — по разрешениям | только WASI без preopen |

@@ -19,6 +19,9 @@ use crate::wasi::WasiStates;
 /// The causes go into the messages, as that is all the frontend gets of an error.
 #[derive(Debug, Error)]
 pub enum LappError {
+    #[error("Command '{command}' is only available to the launcher, not to the window '{window}'")]
+    LauncherOnly { command: &'static str, window: String },
+
     #[error("Lapp '{0}' is not found")]
     NotFound(String),
 
@@ -186,11 +189,11 @@ impl LappsManager {
     }
 
     /// Whether a window may be opened for the lapp `name`.
-    pub fn check_open(&self, name: &str) -> LappResult<()> {
+    pub fn check_open(&self, name: &str) -> LappResult<&Lapp> {
         let lapp = self.lapp(name).ok_or_else(|| LappError::NotFound(name.into()))?;
 
         if lapp.user_settings_read().enabled() {
-            Ok(())
+            Ok(lapp)
         } else {
             Err(LappError::NotEnabled(name.into()))
         }
@@ -274,6 +277,15 @@ impl Lapp {
             },
             Err(error) => Err(LappError::UserSettings { path, error }),
         }
+    }
+
+    /// The title of the lapp window: the user's one, else the manifest one, else the lapp name.
+    pub fn title(&self, name: &str) -> String {
+        [self.user_settings_read().title(), self.manifest_settings.title()]
+            .into_iter()
+            .find(|title| !title.is_empty())
+            .unwrap_or(name)
+            .to_owned()
     }
 
     pub fn user_settings_read(&self) -> RwLockReadGuard<'_, LappUserSettings> {
