@@ -310,7 +310,11 @@ keypair генерировался в браузере и передавался
 
 7.4. **`remove_lapp`** с подтверждением. Удаляет корни `back` и `front` и файл
 `lapps/config/<name>.toml` — иначе следующий лапп с тем же именем унаследует права. Каталог данных
-по умолчанию сохраняется.
+по умолчанию сохраняется. Данные WebView origin-а лаппа (`lapp-<name>://localhost`, на Windows и
+Android — `http://lapp-<name>.localhost`) удаляются: иначе следующий лапп с тем же именем получит
+его `localStorage` и IndexedDB. Tauri умеет очищать только весь профиль (`clear_all_browsing_data`),
+поэтому нужна своя обвязка по платформам: WebKitGTK — `WebsiteDataManager`, Android —
+`WebStorage.deleteOrigin`, WebView2 — очистка по origin.
 
 7.5. Задача `cargo make lar` (`APP_NAME=...`), собирающая архив примера.
 
