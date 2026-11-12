@@ -626,6 +626,16 @@ impl LappUserSettings {
     }
 }
 
+/// What the launcher shows of a registered lapp.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct LappInfo {
+    pub name: String,
+    pub manifest: LappSettings,
+    pub user_settings: LappUserSettings,
+    pub effective_permissions: PermissionsSettings,
+    pub is_running: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

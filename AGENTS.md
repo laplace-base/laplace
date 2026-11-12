@@ -260,8 +260,6 @@ branches in the workspace `Cargo.toml`.
   and `android-assets` ships the same files as package assets.
 - `laplace-app` does not compile while `lapps/front/` is missing — `generate_context!` requires
   `frontend-dist` to exist; CI creates it empty.
-- `crates/front/src/lapps.rs::list()` returns a hardcoded single `echo` entry; there is no
-  command yet to enumerate real lapps from the host.
-- `open_lapp` still panics when the window fails to build; `handle_http` and `LappsManager::load` report
-  errors instead (a broken lapp is skipped at startup, a failed request rejects the `invoke`
-  promise of the frontend).
+- `crates/front/src/lapps.rs::list()` returns a hardcoded single `echo` entry: the host commands
+  `get_lapps` and `update_lapp` exist, but the launcher does not call them yet (stage 6 of the plan).
+- Until the window ACL (task 26-11-10) every window may call every command, `update_lapp` included.

@@ -1,6 +1,6 @@
 use std::future::Future;
 
-use laplace_front_api::{invoke, invoke_without_args};
+use laplace_front_api::{invoke_without_args, try_invoke};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::JsValue;
 use wasm_dom::UnwrapThrowExt;
@@ -14,7 +14,7 @@ struct OpenLappArgs<'a> {
     name: &'a str,
 }
 
-pub fn open_lapp(name: impl AsRef<str>) -> impl Future<Output = JsValue> + 'static {
+pub fn open_lapp(name: impl AsRef<str>) -> impl Future<Output = Result<JsValue, JsValue>> + 'static {
     let args = serde_wasm_bindgen::to_value(&OpenLappArgs { name: name.as_ref() }).unwrap_throw();
-    invoke("open_lapp", args)
+    try_invoke("open_lapp", args)
 }

@@ -5,8 +5,9 @@ use laplace_app_lib::api::http::{HttpError, process_http};
 use laplace_app_lib::{LappError, LappsManager, State};
 use laplace_common_api::http::{Request, StatusCode};
 use laplace_settings::laplace::LappsSettings;
-use laplace_settings::lapp::MAIN_NAME;
 use laplace_settings::lapp::access::{FrontPermission, Permission};
+use laplace_settings::lapp::update::UpdateQuery;
+use laplace_settings::lapp::{LappUserSettings, MAIN_NAME};
 
 const MANIFEST: &str = r#"
 [application]
@@ -107,7 +108,7 @@ fn lapp_without_user_settings_has_the_initial_ones() {
     fixture.lapp("fresh", MANIFEST, true, None);
     let state = fixture.state();
 
-    let user = state.lapps.lapp("fresh").unwrap().user_settings();
+    let user = state.lapps.lapp("fresh").unwrap().user_settings_read();
     assert!(user.enabled());
     assert!(!user.autoload());
     assert!(!state.lapps.is_running("fresh"));
@@ -209,4 +210,96 @@ fn lapp_with_unreadable_settings_is_skipped() {
     assert!(state.lapps.lapp("bad-manifest").is_none());
     assert!(state.lapps.lapp("bad-user-config").is_none());
     assert!(get(&state, "good").is_ok());
+}
+
+#[test]
+fn get_lapps_lists_registered_lapps_by_name() {
+    let fixture = Fixture::new("get-lapps");
+    fixture
+        .lapp("second", MANIFEST, true, Some("[application]\nautoload = true\n"))
+        .lapp("first", MANIFEST, true, None);
+    let state = fixture.state();
+
+    let lapps = state.lapps.lapps();
+    let names: Vec<_> = lapps.iter().map(|lapp| lapp.name.as_str()).collect();
+    assert_eq!(names, ["first", "second"]);
+
+    let (first, second) = (&lapps[0], &lapps[1]);
+    assert_eq!(first.manifest.title(), "Test");
+    assert!(first.user_settings.enabled());
+    assert_eq!(first.effective_permissions.front, [FrontPermission::InvokeBack]);
+    assert!(!first.is_running);
+
+    assert!(second.user_settings.autoload());
+    assert!(second.effective_permissions.front.is_empty());
+    assert!(second.is_running);
+}
+
+#[test]
+fn disabling_stops_the_lapp() {
+    let fixture = Fixture::new("disable");
+    fixture.lapp("echo", MANIFEST, true, None);
+
+    let state = fixture.state();
+    let manifest_path = fixture.settings().manifest_path("echo");
+    let config_path = fixture.settings().user_config_path("echo");
+
+    assert!(get(&state, "echo").is_ok());
+    assert!(state.lapps.is_running("echo"));
+
+    let query = UpdateQuery::new("echo").enabled(false);
+    assert_eq!(state.lapps.update_lapp(query.clone()).unwrap(), query);
+
+    assert!(!state.lapps.is_running("echo"));
+    assert_eq!(fs::read_to_string(&manifest_path).unwrap(), MANIFEST);
+    let manifest = state.lapps.lapps().remove(0).manifest;
+    assert!(!LappUserSettings::load(&config_path, &manifest).unwrap().enabled());
+    assert!(matches!(
+        get(&state, "echo"),
+        Err(HttpError::Lapp(LappError::NotEnabled(_)))
+    ));
+}
+
+#[test]
+fn revoking_invoke_back_stops_the_lapp() {
+    let fixture = Fixture::new("revoke");
+    fixture.lapp("echo", MANIFEST, true, None);
+    let state = fixture.state();
+
+    assert!(get(&state, "echo").is_ok());
+
+    let query = UpdateQuery::new("echo").deny_permission(FrontPermission::InvokeBack);
+    assert_eq!(state.lapps.update_lapp(query.clone()).unwrap(), query);
+
+    assert!(!state.lapps.is_running("echo"));
+    assert!(matches!(
+        get(&state, "echo"),
+        Err(HttpError::Lapp(LappError::PermissionDenied { .. }))
+    ));
+}
+
+#[test]
+fn update_without_changes_keeps_everything() {
+    let fixture = Fixture::new("no-op");
+    fixture.lapp("echo", MANIFEST, true, None);
+    let state = fixture.state();
+
+    assert!(get(&state, "echo").is_ok());
+
+    let updated = state
+        .lapps
+        .update_lapp(
+            UpdateQuery::new("echo")
+                .enabled(true)
+                .allow_permission(FrontPermission::InvokeBack),
+        )
+        .unwrap();
+    assert!(!updated.is_applied());
+    assert!(state.lapps.is_running("echo"));
+    assert!(!fixture.settings().user_config_path("echo").exists());
+
+    assert!(matches!(
+        state.lapps.update_lapp(UpdateQuery::new("missing").enabled(false)),
+        Err(LappError::NotFound(_))
+    ));
 }

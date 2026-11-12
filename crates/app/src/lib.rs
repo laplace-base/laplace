@@ -79,6 +79,8 @@ fn start(lang: String, lapps: LappsManager, assets: Box<dyn Assets<Wry>>) {
         .manage(State { lang, lapps })
         .invoke_handler(tauri::generate_handler![
             api::laplace::get_lang,
+            api::laplace::get_lapps,
+            api::laplace::update_lapp,
             api::laplace::open_lapp,
             api::http::handle_http,
         ])

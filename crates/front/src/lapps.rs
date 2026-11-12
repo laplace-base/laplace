@@ -18,7 +18,9 @@ pub fn register_actions() {
         let lapp_name = args.get("name").as_string().unwrap_or_default();
 
         spawn_local(async move {
-            api::open_lapp(&lapp_name).await;
+            if let Err(err) = api::open_lapp(&lapp_name).await {
+                log::error!("Failed to open lapp '{lapp_name}': {err:?}");
+            }
         });
     });
 }

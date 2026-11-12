@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard, PoisonError, RwLock, RwLockReadGuard};
+use std::sync::{Mutex, MutexGuard, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockError};
 
 use laplace_settings::laplace::LappsSettings;
 use laplace_settings::lapp::access::{FrontPermission, Permission};
 use laplace_settings::lapp::file::LappSettingsError;
-use laplace_settings::lapp::{self, LappSettings, LappUserSettings};
+use laplace_settings::lapp::update::UpdateQuery;
+use laplace_settings::lapp::{self, LappInfo, LappSettings, LappUserSettings};
 use thiserror::Error;
 use wasmtime::component::{Component, Linker};
 use wasmtime::error::Context;
@@ -35,6 +36,9 @@ pub enum LappError {
 
     #[error("Failed to read the user settings '{}': {error}", path.display())]
     UserSettings { path: PathBuf, error: LappSettingsError },
+
+    #[error("Failed to save the user settings '{}': {error}", path.display())]
+    SaveUserSettings { path: PathBuf, error: LappSettingsError },
 
     #[error("Failed to start lapp '{name}': {error:#}")]
     Start { name: String, error: anyhow::Error },
@@ -138,7 +142,58 @@ impl LappsManager {
 
     /// Whether the backend of the lapp `name` has an instance.
     pub fn is_running(&self, name: &str) -> bool {
-        self.lapp(name).is_some_and(|lapp| lapp.lock_instance().is_some())
+        self.lapp(name).is_some_and(Lapp::is_running)
+    }
+
+    /// The registered lapps, sorted by name.
+    pub fn lapps(&self) -> Vec<LappInfo> {
+        let mut lapps: Vec<_> = self.lapps.iter().map(|(name, lapp)| lapp.info(name)).collect();
+        lapps.sort_by(|a, b| a.name.cmp(&b.name));
+        lapps
+    }
+
+    /// Applies `query` to the user settings of its lapp, saves them and returns the applied part.
+    ///
+    /// Disabling the lapp or changing its permissions stops its running backend; the next one is
+    /// started as usual, on the first request.
+    pub fn update_lapp(&self, query: UpdateQuery) -> LappResult<UpdateQuery> {
+        let name = &query.lapp_name;
+        let lapp = self.lapp(&name).ok_or_else(|| LappError::NotFound(name.clone()))?;
+
+        let updated = {
+            let mut user_settings = lapp.user_settings_write();
+
+            // Changed in a copy, so that a failed save leaves the registry as the file is.
+            let mut changed = user_settings.clone();
+            let updated = changed
+                .update(query, &lapp.manifest_settings, &lapp.user_config_path)
+                .map_err(|error| LappError::SaveUserSettings {
+                    path: lapp.user_config_path.clone(),
+                    error,
+                })?;
+            *user_settings = changed;
+            updated
+        };
+
+        let stops =
+            updated.enabled == Some(false) || updated.allow_permission.is_some() || updated.deny_permission.is_some();
+
+        if stops && lapp.lock_instance().take().is_some() {
+            log::debug!("Stop lapp '{}'", lapp.manifest_settings.lapp_name);
+        }
+
+        Ok(updated)
+    }
+
+    /// Whether a window may be opened for the lapp `name`.
+    pub fn check_open(&self, name: &str) -> LappResult<()> {
+        let lapp = self.lapp(name).ok_or_else(|| LappError::NotFound(name.into()))?;
+
+        if lapp.user_settings_read().enabled() {
+            Ok(())
+        } else {
+            Err(LappError::NotEnabled(name.into()))
+        }
     }
 
     /// Hands a request of the frontend of the lapp `name` to its backend, starting it if needed.
@@ -180,15 +235,22 @@ impl LappsManager {
 pub struct Lapp {
     manifest_settings: LappSettings,
     user_settings: RwLock<LappUserSettings>,
+    user_config_path: PathBuf,
     back_path: Option<PathBuf>,
     instance: Mutex<Option<LappState>>,
 }
 
 impl Lapp {
-    pub fn new(manifest_settings: LappSettings, user_settings: LappUserSettings, back_path: Option<PathBuf>) -> Self {
+    pub fn new(
+        manifest_settings: LappSettings,
+        user_settings: LappUserSettings,
+        user_config_path: PathBuf,
+        back_path: Option<PathBuf>,
+    ) -> Self {
         Self {
             manifest_settings,
             user_settings: RwLock::new(user_settings),
+            user_config_path,
             back_path,
             instance: Mutex::new(None),
         }
@@ -199,29 +261,56 @@ impl Lapp {
         let manifest_settings = LappSettings::load(name, &path).map_err(|error| LappError::Manifest { path, error })?;
 
         let path = settings.user_config_path(name);
-        let user_settings = LappUserSettings::load(&path, &manifest_settings)
-            .map_err(|error| LappError::UserSettings { path, error })?;
-
-        let back_path = LappState::back_path(lapp_dir, name);
-
-        Ok(Self::new(
-            manifest_settings,
-            user_settings,
-            back_path.exists().then_some(back_path),
-        ))
+        match LappUserSettings::load(&path, &manifest_settings) {
+            Ok(user_settings) => {
+                let back_path = LappState::back_path(lapp_dir, name);
+                Ok(Self::new(
+                    manifest_settings,
+                    user_settings,
+                    path,
+                    back_path.exists().then_some(back_path),
+                ))
+            },
+            Err(error) => Err(LappError::UserSettings { path, error }),
+        }
     }
 
-    pub fn user_settings(&self) -> RwLockReadGuard<'_, LappUserSettings> {
+    pub fn user_settings_read(&self) -> RwLockReadGuard<'_, LappUserSettings> {
         self.user_settings.read().unwrap_or_else(PoisonError::into_inner)
     }
 
+    fn user_settings_write(&self) -> RwLockWriteGuard<'_, LappUserSettings> {
+        self.user_settings.write().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Does not wait for a call in progress: a busy instance is running.
+    pub fn is_running(&self) -> bool {
+        match self.instance.try_lock() {
+            Ok(instance) => instance.is_some(),
+            Err(TryLockError::Poisoned(err)) => err.into_inner().is_some(),
+            Err(TryLockError::WouldBlock) => true,
+        }
+    }
+
+    pub fn info(&self, name: &str) -> LappInfo {
+        let user_settings = self.user_settings_read().clone();
+        LappInfo {
+            name: name.into(),
+            effective_permissions: user_settings.effective_permissions(&self.manifest_settings),
+            manifest: self.manifest_settings.clone(),
+            user_settings,
+            is_running: self.is_running(),
+        }
+    }
+
     fn is_startup_active(&self) -> bool {
-        self.manifest_settings.is_lapp_startup_active(&self.user_settings())
+        self.manifest_settings
+            .is_lapp_startup_active(&self.user_settings_read())
     }
 
     // Whether the frontend of the lapp may call its backend.
     fn check_invoke_back(&self, name: &str) -> LappResult<()> {
-        let user_settings = self.user_settings();
+        let user_settings = self.user_settings_read();
 
         if !user_settings.enabled() {
             return Err(LappError::NotEnabled(name.into()));

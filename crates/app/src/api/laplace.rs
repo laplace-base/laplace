@@ -1,5 +1,7 @@
 use std::path::Path;
 
+use laplace_settings::lapp::LappInfo;
+use laplace_settings::lapp::update::UpdateQuery;
 use tauri::webview::{DownloadEvent, PageLoadEvent};
 use tauri::{AppHandle, Manager as _, WebviewUrl, WebviewWindowBuilder};
 
@@ -13,8 +15,30 @@ pub fn get_lang(state: tauri::State<State>) -> String {
 }
 
 #[tauri::command]
-pub fn open_lapp(handle: AppHandle, name: &str) {
+pub fn get_lapps(state: tauri::State<State>) -> Vec<LappInfo> {
+    state.lapps.lapps()
+}
+
+/// Runs off the main thread: it writes the user settings file and waits for a call in progress
+/// to stop the backend.
+#[tauri::command]
+pub async fn update_lapp(app: AppHandle, query: UpdateQuery) -> Result<UpdateQuery, String> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<State>().lapps.update_lapp(query))
+        .await
+        .map_err(|err| format!("The lapp update task has failed: {err}"))
+        .and_then(|result| result.map_err(|err| err.to_string()))
+        .inspect_err(|err| log::error!("{err}"))
+}
+
+/// Async, since building a window in a synchronous command deadlocks on Windows.
+#[tauri::command]
+pub async fn open_lapp(handle: AppHandle, state: tauri::State<'_, State>, name: &str) -> Result<(), String> {
     log::debug!("Open lapp: {name}");
+    state
+        .lapps
+        .check_open(name)
+        .map_err(|err| err.to_string())
+        .inspect_err(|err| log::error!("{err}"))?;
 
     // The window label is the lapp name — that is what `handle_http` routes by — so a lapp has a
     // single window, and opening it again raises the one that is there instead of failing on the
@@ -22,7 +46,7 @@ pub fn open_lapp(handle: AppHandle, name: &str) {
     if let Some(window) = handle.get_webview_window(name) {
         log::debug!("Lapp '{name}' is already open");
         raise(&window, name);
-        return;
+        return Ok(());
     }
 
     let builder = WebviewWindowBuilder::new(&handle, name, WebviewUrl::App(Path::new(name).join("index.html")))
@@ -34,7 +58,7 @@ pub fn open_lapp(handle: AppHandle, name: &str) {
                 DownloadEvent::Finished { url, path, success: _ } => {
                     log::debug!("Download: Finished {url:?}, {path:?}")
                 },
-                _ => todo!(),
+                _ => log::debug!("Download: other event"),
             }
             true
         })
@@ -57,7 +81,11 @@ pub fn open_lapp(handle: AppHandle, name: &str) {
     #[cfg(target_os = "android")]
     let builder = builder.activity_name(android::LAPP_ACTIVITY);
 
-    let _lapp_window = builder.build().expect("Failed to open lapp");
+    builder
+        .build()
+        .map(drop)
+        .map_err(|err| format!("Failed to open the window of lapp '{name}': {err}"))
+        .inspect_err(|err| log::error!("{err}"))
 }
 
 /// Brings the window that is already open back in front of the user.
