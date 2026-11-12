@@ -220,7 +220,9 @@ need its own way to unpack the bundle.
   every registered lapp and of the launcher; its handler (`FsStoredAssets::respond`) reads from
   `platform.frontend_assets_root` and answers only the window of that lapp, only `/<name>/**` and the
   shared `/vendor/**`, never outside of the root. A lapp registered after startup would have no scheme
-  until a restart. The names `laplace` and `vendor` are reserved (`lapp::is_reserved`).
+  until a restart. A lapp window navigates only within its own frontend (`on_navigation`,
+  `assets::is_navigation_allowed`) and opens no new windows (`on_new_window`). The names `laplace` and
+  `vendor` are reserved (`lapp::is_reserved`).
 - `crates/app/gen/android/app/src/main/assets/data/Laplace.toml` — the same platform config for the
   Android package, with paths relative to the data directory. It is unpacked once and never
   overwritten afterwards, so on a device the file the app reads is

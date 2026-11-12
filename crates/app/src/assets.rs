@@ -30,17 +30,31 @@ pub fn lapp_url(lapp_name: &str) -> Url {
     .expect("a lapp name makes a valid URL")
 }
 
-/// Whether the window of the lapp `lapp_name` may load the asset at the URL `path`: its own
+/// Whether the window of the lapp `lapp_name` may load the asset at the decoded URL `path`: its own
 /// frontend or the shared `vendor` assets, and nothing outside of them.
 fn is_asset_allowed(lapp_name: &str, path: &str) -> bool {
-    let Some(path) = path.strip_prefix('/') else {
-        return false;
-    };
-    let mut components = Path::new(path).components();
-    let first = components.next();
+    path_top_dir(path).is_some_and(|top| top == lapp_name || top == VENDOR_NAME)
+}
 
-    matches!(first, Some(Component::Normal(first)) if first == lapp_name || first == VENDOR_NAME)
-        && components.all(is_component_normal)
+/// The first directory of the decoded URL `path`, if the path is made of plain components only.
+fn path_top_dir(path: &str) -> Option<&str> {
+    let mut components = Path::new(path.strip_prefix('/')?).components();
+    let Some(Component::Normal(top)) = components.next() else {
+        return None;
+    };
+    components.all(is_component_normal).then_some(top.to_str()?)
+}
+
+/// Whether the window of the lapp `lapp_name` may navigate to `url`: only to the pages of its own
+/// frontend, on its own scheme — the custom form or the `http(s)://<scheme>.localhost` one of
+/// Windows and Android.
+pub fn is_navigation_allowed(lapp_name: &str, url: &Url) -> bool {
+    let scheme = lapp_scheme(lapp_name);
+    let host = url.host_str();
+    let own_origin = (url.scheme() == scheme && host == Some("localhost"))
+        || (matches!(url.scheme(), "http" | "https") && host == Some(&format!("{scheme}.localhost")));
+
+    own_origin && path_top_dir(&decode(url.path())) == Some(lapp_name)
 }
 
 fn is_component_normal(component: Component) -> bool {
@@ -152,6 +166,33 @@ mod tests {
             "/echo%2F..%2F..%2FLaplace.toml",
         ] {
             assert!(!is_asset_allowed("echo", &decode(path)), "{path}");
+        }
+    }
+
+    #[test]
+    fn lapp_window_navigates_within_its_own_frontend_only() {
+        let allowed = |url: &str| is_navigation_allowed("echo", &Url::parse(url).unwrap());
+
+        assert!(allowed("lapp-echo://localhost/echo/index.html"));
+        assert!(allowed("lapp-echo://localhost/echo/sub/page.html?x=1#y"));
+        assert!(allowed("http://lapp-echo.localhost/echo/index.html"));
+        assert!(allowed("https://lapp-echo.localhost/echo/index.html"));
+        assert!(allowed(lapp_url("echo").as_str()));
+
+        for url in [
+            "lapp-echo://localhost/laplace/index.html",
+            "lapp-echo://localhost/vendor/htmx/2.0.8/htmx.min.js",
+            "lapp-echo://localhost/echo/..%2F..%2FLaplace.toml",
+            "lapp-echo://other/echo/index.html",
+            "lapp-notes://localhost/echo/index.html",
+            "lapp-laplace://localhost/laplace/index.html",
+            "http://lapp-notes.localhost/echo/index.html",
+            "http://localhost/echo/index.html",
+            "https://example.org/echo/index.html",
+            "tauri://localhost/echo/index.html",
+            "about:blank",
+        ] {
+            assert!(!allowed(url), "{url}");
         }
     }
 

@@ -8,7 +8,7 @@ use tauri::{AppHandle, Manager as _, WebviewUrl, WebviewWindow, WebviewWindowBui
 use crate::State;
 #[cfg(target_os = "android")]
 use crate::android;
-use crate::assets::lapp_url;
+use crate::assets::{is_navigation_allowed, lapp_url};
 use crate::lapps::{LappError, LappResult};
 
 #[tauri::command]
@@ -100,9 +100,18 @@ pub async fn open_lapp(
                 log::debug!("{} finished loading", payload.url());
             },
         })
-        .on_navigation(|url| {
-            log::debug!("Navigation: {url}");
-            true
+        // Not out of its own frontend: neither to another lapp nor to an external site.
+        .on_navigation({
+            let lapp_name = name.to_owned();
+            move |url| {
+                let allowed = is_navigation_allowed(&lapp_name, url);
+                if allowed {
+                    log::debug!("Navigation: {url}");
+                } else {
+                    log::warn!("Lapp '{lapp_name}' is denied the navigation to '{url}'");
+                }
+                allowed
+            }
         })
         // A window opened by the lapp would be neither filtered nor routed to it.
         .on_new_window({
