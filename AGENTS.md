@@ -140,7 +140,10 @@ be must exist as a Kotlin class in `org.laplace` *and* be declared in the manife
 `open_lapp` (`crates/app/src/api/laplace.rs`) names for every lapp it opens. Both are empty
 subclasses of `LaplaceActivity`, which is where the shared window setup lives: the webview is laid
 out edge to edge (Android 15+ gives no choice) and the content view is padded by the system-bar,
-cutout and IME insets, so the page does not run under the status bar or the keyboard.
+cutout and IME insets, so the page does not run under the status bar or the keyboard. It also
+destroys the webview of a window that is closed for good (`isFinishing`, not a configuration
+change): `wry` only drops its own handlers, and a dropped webview goes on running the page until it
+is collected.
 
 `LappActivity` is declared with `documentLaunchMode="always"`, which puts every instance of it in a
 task of its own. That is what makes each open lapp a separate entry of the recents screen instead of

@@ -40,6 +40,7 @@ class LappActivity : LaplaceActivity() {
   private var lapp: String? = null
 
   override fun onWebViewCreate(webView: WebView) {
+    super.onWebViewCreate(webView)
     // `wry` names the webview after the label of the window, which is the name of the lapp.
     val name = (webView as? RustWebView)?.id ?: return
     lapp = name
