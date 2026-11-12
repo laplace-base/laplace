@@ -199,12 +199,12 @@ need its own way to unpack the bundle.
   `lapps.data_root/<name>/` (default data dir), which none of those touch. A lapp name is
   `[a-z0-9-]` (`laplace_settings::lapp::is_valid_name`); `LappsManager::load` silently skips entries
   starting with `.` and logs an error for other invalid names.
-- `examples/<name>/manifest.toml` — per-lapp manifest (`LappSettings`): application metadata,
+- `examples/<name>/manifest.toml` — per-lapp manifest (`LappManifestSettings`): application metadata,
   `required_permissions.front` / `.back`, database, network, lapp-to-lapp requests. The host only
   ever reads it. The user decisions are `LappUserSettings` (`lapps.config_root/<name>.toml`); a
   missing file means the initial ones (`LappUserSettings::new`). Changes go through `UpdateQuery`;
   the effective permissions are `LappUserSettings::effective_permissions` (docs/domain.md).
-  Reading and writing these files (`LappSettings::load`, `LappUserSettings::{load, save, update}`)
+  Reading and writing these files (`LappManifestSettings::load`, `LappUserSettings::{load, save, update}`)
   and `LaplaceSettings::new` sit behind the `io` feature of `laplace-settings`, which the host
   enables, so that the crate builds for `wasm32-unknown-unknown` without `config`.
   The host registry is `LappsManager` (`crates/app/src/lapps.rs`, docs/architecture.md «Реестр

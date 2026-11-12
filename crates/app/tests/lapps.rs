@@ -225,13 +225,13 @@ fn get_lapps_lists_registered_lapps_by_name() {
     assert_eq!(names, ["first", "second"]);
 
     let (first, second) = (&lapps[0], &lapps[1]);
-    assert_eq!(first.manifest.title(), "Test");
+    assert_eq!(first.manifest_settings.title(), "Test");
     assert!(first.user_settings.enabled());
-    assert_eq!(first.effective_permissions.front, [FrontPermission::InvokeBack]);
+    assert_eq!(first.effective_permissions().front, [FrontPermission::InvokeBack]);
     assert!(!first.is_running);
 
     assert!(second.user_settings.autoload());
-    assert!(second.effective_permissions.front.is_empty());
+    assert!(second.effective_permissions().front.is_empty());
     assert!(second.is_running);
 }
 
@@ -252,7 +252,7 @@ fn disabling_stops_the_lapp() {
 
     assert!(!state.lapps.is_running("echo"));
     assert_eq!(fs::read_to_string(&manifest_path).unwrap(), MANIFEST);
-    let manifest = state.lapps.lapps().remove(0).manifest;
+    let manifest = state.lapps.lapps().remove(0).manifest_settings;
     assert!(!LappUserSettings::load(&config_path, &manifest).unwrap().enabled());
     assert!(matches!(
         get(&state, "echo"),

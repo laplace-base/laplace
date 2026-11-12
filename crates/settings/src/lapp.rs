@@ -362,7 +362,7 @@ pub struct LappRequestsSettings {
 
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
 #[serde(default)]
-pub struct LappSettings {
+pub struct LappManifestSettings {
     #[serde(default)]
     pub lapp_name: String,
     pub application: ApplicationSettings,
@@ -372,7 +372,7 @@ pub struct LappSettings {
     pub lapp_requests: Option<Vec<LappRequestsSettings>>,
 }
 
-impl LappSettings {
+impl LappManifestSettings {
     #[inline]
     pub fn name(&self) -> &str {
         &self.lapp_name
@@ -429,7 +429,7 @@ pub struct LappUserSettings {
 impl LappUserSettings {
     /// The decisions about a lapp the user has not decided anything about yet: it is enabled and,
     /// if it requires to, may call its own backend, but has no other permission.
-    pub fn new(manifest: &LappSettings) -> Self {
+    pub fn new(manifest: &LappManifestSettings) -> Self {
         let mut settings = Self::default();
         settings.application.app.title = manifest.application.title.clone();
         settings.application.app.description = manifest.application.description.clone();
@@ -456,7 +456,7 @@ impl LappUserSettings {
     }
 
     /// The permissions the lapp actually has: the required ones that are allowed or implicit.
-    pub fn effective_permissions(&self, manifest: &LappSettings) -> PermissionsSettings {
+    pub fn effective_permissions(&self, manifest: &LappManifestSettings) -> PermissionsSettings {
         let required = &manifest.required_permissions;
         PermissionsSettings {
             front: self
@@ -475,7 +475,7 @@ impl LappUserSettings {
     /// Applies `query` and returns the part of it that has changed something.
     ///
     /// A permission the manifest does not require is not allowed, unless it is implicit.
-    pub fn apply(&mut self, mut query: UpdateQuery, manifest: &LappSettings) -> UpdateQuery {
+    pub fn apply(&mut self, mut query: UpdateQuery, manifest: &LappManifestSettings) -> UpdateQuery {
         if let Some(enabled) = query.enabled {
             if self.enabled() != enabled {
                 self.set_enabled(enabled);
@@ -630,18 +630,23 @@ impl LappUserSettings {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct LappInfo {
     pub name: String,
-    pub manifest: LappSettings,
+    pub manifest_settings: LappManifestSettings,
     pub user_settings: LappUserSettings,
-    pub effective_permissions: PermissionsSettings,
     pub is_running: bool,
+}
+
+impl LappInfo {
+    pub fn effective_permissions(&self) -> PermissionsSettings {
+        self.user_settings.effective_permissions(&self.manifest_settings)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn lapp_settings(front: &[FrontPermission], back: &[BackPermission]) -> LappSettings {
-        LappSettings {
+    fn lapp_settings(front: &[FrontPermission], back: &[BackPermission]) -> LappManifestSettings {
+        LappManifestSettings {
             lapp_name: "test".into(),
             application: ApplicationSettings {
                 title: "Test".into(),

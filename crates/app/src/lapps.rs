@@ -7,7 +7,7 @@ use laplace_settings::laplace::LappsSettings;
 use laplace_settings::lapp::access::{FrontPermission, Permission};
 use laplace_settings::lapp::file::LappSettingsError;
 use laplace_settings::lapp::update::UpdateQuery;
-use laplace_settings::lapp::{self, LappInfo, LappSettings, LappUserSettings};
+use laplace_settings::lapp::{self, LappInfo, LappManifestSettings, LappUserSettings};
 use thiserror::Error;
 use wasmtime::component::{Component, Linker};
 use wasmtime::error::Context;
@@ -158,7 +158,7 @@ impl LappsManager {
     /// started as usual, on the first request.
     pub fn update_lapp(&self, query: UpdateQuery) -> LappResult<UpdateQuery> {
         let name = &query.lapp_name;
-        let lapp = self.lapp(&name).ok_or_else(|| LappError::NotFound(name.clone()))?;
+        let lapp = self.lapp(name).ok_or_else(|| LappError::NotFound(name.clone()))?;
 
         let updated = {
             let mut user_settings = lapp.user_settings_write();
@@ -233,7 +233,7 @@ impl LappsManager {
 
 /// A registered lapp.
 pub struct Lapp {
-    manifest_settings: LappSettings,
+    manifest_settings: LappManifestSettings,
     user_settings: RwLock<LappUserSettings>,
     user_config_path: PathBuf,
     back_path: Option<PathBuf>,
@@ -242,7 +242,7 @@ pub struct Lapp {
 
 impl Lapp {
     pub fn new(
-        manifest_settings: LappSettings,
+        manifest_settings: LappManifestSettings,
         user_settings: LappUserSettings,
         user_config_path: PathBuf,
         back_path: Option<PathBuf>,
@@ -258,7 +258,8 @@ impl Lapp {
 
     pub fn read(settings: &LappsSettings, name: &str, lapp_dir: &Path) -> LappResult<Self> {
         let path = settings.manifest_path(name);
-        let manifest_settings = LappSettings::load(name, &path).map_err(|error| LappError::Manifest { path, error })?;
+        let manifest_settings =
+            LappManifestSettings::load(name, &path).map_err(|error| LappError::Manifest { path, error })?;
 
         let path = settings.user_config_path(name);
         match LappUserSettings::load(&path, &manifest_settings) {
@@ -293,12 +294,10 @@ impl Lapp {
     }
 
     pub fn info(&self, name: &str) -> LappInfo {
-        let user_settings = self.user_settings_read().clone();
         LappInfo {
             name: name.into(),
-            effective_permissions: user_settings.effective_permissions(&self.manifest_settings),
-            manifest: self.manifest_settings.clone(),
-            user_settings,
+            manifest_settings: self.manifest_settings.clone(),
+            user_settings: self.user_settings_read().clone(),
             is_running: self.is_running(),
         }
     }

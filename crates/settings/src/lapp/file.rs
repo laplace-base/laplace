@@ -4,7 +4,7 @@ use std::{fs, io};
 use thiserror::Error;
 
 use crate::lapp::update::UpdateQuery;
-use crate::lapp::{LappSettings, LappUserSettings};
+use crate::lapp::{LappManifestSettings, LappUserSettings};
 
 #[derive(Debug, Error)]
 pub enum LappSettingsError {
@@ -20,7 +20,7 @@ pub enum LappSettingsError {
 
 pub type LappSettingsResult<T> = Result<T, LappSettingsError>;
 
-impl LappSettings {
+impl LappManifestSettings {
     /// Reads the manifest of the lapp `lapp_name`; the host never writes it.
     pub fn load(lapp_name: impl Into<String>, path: impl AsRef<Path>) -> LappSettingsResult<Self> {
         let mut settings: Self = toml::from_str(&fs::read_to_string(path)?)?;
@@ -32,7 +32,7 @@ impl LappSettings {
 impl LappUserSettings {
     /// Reads the user decisions about the lapp of `manifest`, or makes the initial ones if there
     /// is no file yet.
-    pub fn load(path: impl AsRef<Path>, manifest: &LappSettings) -> LappSettingsResult<Self> {
+    pub fn load(path: impl AsRef<Path>, manifest: &LappManifestSettings) -> LappSettingsResult<Self> {
         match fs::read_to_string(path) {
             Ok(content) => Ok(toml::from_str(&content)?),
             Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(Self::new(manifest)),
@@ -61,7 +61,7 @@ impl LappUserSettings {
     pub fn update(
         &mut self,
         query: UpdateQuery,
-        manifest: &LappSettings,
+        manifest: &LappManifestSettings,
         path: impl AsRef<Path>,
     ) -> LappSettingsResult<UpdateQuery> {
         let updated = self.apply(query, manifest);
@@ -111,7 +111,7 @@ mod tests {
     #[test]
     fn load_manifest() {
         let dir = temp_dir("manifest");
-        let manifest = LappSettings::load("notes", write_manifest(&dir)).unwrap();
+        let manifest = LappManifestSettings::load("notes", write_manifest(&dir)).unwrap();
 
         assert_eq!(manifest.name(), "notes");
         assert_eq!(manifest.application.version, "1.2.0");
@@ -129,7 +129,7 @@ mod tests {
     #[test]
     fn load_echo_manifest() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/echo/manifest.toml");
-        let manifest = LappSettings::load("echo", path).unwrap();
+        let manifest = LappManifestSettings::load("echo", path).unwrap();
 
         assert_eq!(manifest.title(), "Echo");
         assert_eq!(manifest.required_permissions.front, [FrontPermission::InvokeBack]);
@@ -140,7 +140,7 @@ mod tests {
         let dir = temp_dir("missing-manifest");
 
         assert!(matches!(
-            LappSettings::load("notes", dir.join("manifest.toml")),
+            LappManifestSettings::load("notes", dir.join("manifest.toml")),
             Err(LappSettingsError::Io(_))
         ));
     }
@@ -149,7 +149,7 @@ mod tests {
     fn user_settings_round_trip() {
         let dir = temp_dir("user");
         let config_dir = dir.join("config");
-        let manifest = LappSettings::load("notes", write_manifest(&dir)).unwrap();
+        let manifest = LappManifestSettings::load("notes", write_manifest(&dir)).unwrap();
         let config_path = config_dir.join("notes.toml");
 
         let mut user = LappUserSettings::load(&config_path, &manifest).unwrap();
@@ -204,7 +204,7 @@ mod tests {
     #[test]
     fn update_without_changes_does_not_write() {
         let dir = temp_dir("no-write");
-        let manifest = LappSettings::load("notes", write_manifest(&dir)).unwrap();
+        let manifest = LappManifestSettings::load("notes", write_manifest(&dir)).unwrap();
         let config_path = dir.join("config").join("notes.toml");
 
         let mut user = LappUserSettings::load(&config_path, &manifest).unwrap();
@@ -220,7 +220,7 @@ mod tests {
     #[test]
     fn broken_user_settings_fail() {
         let dir = temp_dir("broken");
-        let manifest = LappSettings::load("notes", write_manifest(&dir)).unwrap();
+        let manifest = LappManifestSettings::load("notes", write_manifest(&dir)).unwrap();
         let config_path = dir.join("notes.toml");
 
         fs::write(&config_path, "enabled = ").unwrap();
