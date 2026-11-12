@@ -102,8 +102,8 @@ impl LappsManager {
                 continue;
             }
 
-            if lapp::is_main(&lapp_name) {
-                log::debug!("Skip '{}': the name is reserved for the launcher", lapp_dir.display());
+            if lapp::is_reserved(&lapp_name) {
+                log::debug!("Skip '{}': the name is reserved by the platform", lapp_dir.display());
                 continue;
             }
 

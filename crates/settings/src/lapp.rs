@@ -22,6 +22,14 @@ pub fn is_main(name: &str) -> bool {
     name == MAIN_NAME
 }
 
+/// Name of the frontend assets shared by every window, `<frontend_assets_root>/vendor/`.
+pub const VENDOR_NAME: &str = "vendor";
+
+/// Whether `name` belongs to the platform and cannot name a lapp.
+pub fn is_reserved(name: &str) -> bool {
+    is_main(name) || name == VENDOR_NAME
+}
+
 /// Whether `name` can name a lapp: it is a directory and file name, a window label and a host name.
 pub fn is_valid_name(name: &str) -> bool {
     !name.is_empty()
@@ -38,7 +46,6 @@ pub struct ApplicationSettings {
     pub title: String,
     pub description: Option<String>,
     pub tags: Option<Vec<String>>,
-    pub additional_static_dirs: Vec<PathBuf>,
 }
 
 #[skip_serializing_none]

@@ -7,7 +7,7 @@ use laplace_common_api::http::{Request, StatusCode};
 use laplace_settings::laplace::LappsSettings;
 use laplace_settings::lapp::access::{FrontPermission, Permission};
 use laplace_settings::lapp::update::UpdateQuery;
-use laplace_settings::lapp::{LappUserSettings, MAIN_NAME};
+use laplace_settings::lapp::{LappUserSettings, MAIN_NAME, VENDOR_NAME};
 
 const MANIFEST: &str = r#"
 [application]
@@ -322,4 +322,13 @@ fn window_title_falls_back_to_the_manifest_and_the_name() {
     assert_eq!(title("renamed"), "Mine");
     assert_eq!(title("untitled-user"), "Test");
     assert_eq!(title("untitled"), "untitled");
+}
+
+#[test]
+fn vendor_is_not_a_registered_lapp() {
+    let fixture = Fixture::new("vendor");
+    fixture.lapp(VENDOR_NAME, MANIFEST, true, None);
+    let state = fixture.state();
+
+    assert!(state.lapps.lapp(VENDOR_NAME).is_none());
 }

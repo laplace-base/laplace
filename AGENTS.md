@@ -214,7 +214,10 @@ need its own way to unpack the bundle.
 - `crates/app/Tauri.toml` — Tauri config. It is **compiled into the binary** by
   `tauri::generate_context!()`, so changing it requires a rebuild of `laplace-app`. The assets it
   embeds from `frontend-dist` are never used: both `run_desktop` and `run_mobile` replace them with
-  `FsStoredAssets`, which reads from `platform.frontend_assets_root` at runtime.
+  `FsStoredAssets`, which reads from `platform.frontend_assets_root` at runtime and serves nothing
+  outside of it. A lapp window additionally gets only `/<name>/**` and the shared `/vendor/**`: the
+  `on_web_resource_request` hook of `open_lapp` answers anything else with `403`
+  (`assets::is_asset_allowed`). The names `laplace` and `vendor` are reserved (`lapp::is_reserved`).
 - `crates/app/gen/android/app/src/main/assets/data/Laplace.toml` — the same platform config for the
   Android package, with paths relative to the data directory. It is unpacked once and never
   overwritten afterwards, so on a device the file the app reads is

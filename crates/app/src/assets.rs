@@ -1,10 +1,39 @@
 use std::borrow::Cow;
 use std::fs::{self, DirEntry};
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
+use laplace_settings::lapp::VENDOR_NAME;
 use tauri::utils::assets::{AssetKey, AssetsIter, CspHash};
 use tauri::{Assets, Runtime};
+
+/// Whether the window of the lapp `lapp_name` may load the asset at the URL `path`: its own
+/// frontend or the shared `vendor` assets, and nothing outside of them.
+pub fn is_asset_allowed(lapp_name: &str, path: &str) -> bool {
+    // Decoded as Tauri does before it looks the asset up, so that `%2F` cannot hide a `..`.
+    let path = percent_encoding::percent_decode_str(path).decode_utf8_lossy();
+    let Some(path) = path.strip_prefix('/') else {
+        return false;
+    };
+    let mut components = Path::new(path).components();
+    let first = components.next();
+
+    matches!(first, Some(Component::Normal(first)) if first == lapp_name || first == VENDOR_NAME)
+        && components.all(is_normal_component)
+}
+
+/// The path of `key` inside `root`, if the key does not lead out of it.
+fn asset_path(root: &Path, key: &str) -> Option<PathBuf> {
+    let relative = Path::new(key.strip_prefix('/').unwrap_or(key));
+    relative
+        .components()
+        .all(is_normal_component)
+        .then(|| root.join(relative))
+}
+
+fn is_normal_component(component: Component) -> bool {
+    matches!(component, Component::Normal(_))
+}
 
 pub struct FsStoredAssets {
     root: PathBuf,
@@ -18,8 +47,11 @@ impl FsStoredAssets {
 
 impl<R: Runtime> Assets<R> for FsStoredAssets {
     fn get(&self, key: &AssetKey) -> Option<Cow<'_, [u8]>> {
-        let relative_path = key.as_ref().strip_prefix("/").unwrap_or(key.as_ref());
-        let path = self.root.join(relative_path);
+        let Some(path) = asset_path(&self.root, key.as_ref()) else {
+            log::warn!("Asset '{}' is rejected: it leads out of the assets root", key.as_ref());
+            return None;
+        };
+
         if path.exists() {
             Some(Cow::Owned(
                 std::fs::read(&path)
@@ -107,4 +139,58 @@ fn visit_dirs(dir: &Path, entries: &mut Vec<DirEntry>) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("laplace-assets-{}-{name}", std::process::id()));
+        fs::remove_dir_all(&dir).ok();
+        dir
+    }
+
+    #[test]
+    fn lapp_window_gets_its_own_and_vendor_assets_only() {
+        for lapp_name in ["echo", "notes"] {
+            assert!(is_asset_allowed(lapp_name, "/vendor/htmx/2.0.8/htmx.min.js"));
+        }
+        assert!(is_asset_allowed("echo", "/echo/index.html"));
+        assert!(is_asset_allowed("echo", "/echo/dist/echo-front.js"));
+
+        for path in [
+            "/laplace/index.html",
+            "/other/index.html",
+            "/vendor/..%2Fother/index.html",
+            "/echo/..%2F..%2Ffile",
+            "/echo/../other/index.html",
+            "/",
+            "",
+            "/echo%2F..%2F..%2FLaplace.toml",
+        ] {
+            assert!(!is_asset_allowed("echo", path), "{path}");
+        }
+    }
+
+    #[test]
+    fn assets_do_not_lead_out_of_the_root() {
+        let dir = temp_dir("not_lead_out");
+        let assets_root = dir.join("front");
+        let lapp_assets_root = assets_root.join("echo");
+
+        fs::create_dir_all(&lapp_assets_root).unwrap();
+        fs::write(lapp_assets_root.join("index.html"), "echo").unwrap();
+        fs::write(dir.join("secret.toml"), "secret").unwrap();
+        let assets = FsStoredAssets::new(&assets_root);
+
+        let get = |key: &str| {
+            <FsStoredAssets as Assets<tauri::Wry>>::get(&assets, &AssetKey::from(key)).map(|data| data.into_owned())
+        };
+        assert_eq!(get("/echo/index.html").as_deref(), Some(b"echo".as_slice()));
+        assert_eq!(get("/../secret.toml"), None);
+        assert_eq!(get("/echo/../../secret.toml"), None);
+
+        fs::remove_dir_all(dir).unwrap();
+    }
 }

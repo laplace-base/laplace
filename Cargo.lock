@@ -2549,6 +2549,7 @@ dependencies = [
  "laplace-common-api",
  "laplace-settings",
  "log",
+ "percent-encoding",
  "serde",
  "serde_json",
  "tauri",
