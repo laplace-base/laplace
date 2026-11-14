@@ -1,7 +1,6 @@
-use std::fmt;
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
+use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 
 use crate::lapp::access::{BackPermission, FrontPermission, Permission};
@@ -74,9 +73,11 @@ impl Default for ApplicationUserSettings {
 }
 
 #[derive(Debug, Default, Clone, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(default)]
 pub struct PermissionsSettings {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub front: Vec<FrontPermission>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub back: Vec<BackPermission>,
 }
 
@@ -86,6 +87,11 @@ impl PermissionsSettings {
             Permission::Front(permission) => self.front.contains(&permission),
             Permission::Back(permission) => self.back.contains(&permission),
         }
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        let Self { front, back } = self;
+        front.is_empty() && back.is_empty()
     }
 
     pub fn front_iter(&self) -> impl Iterator<Item = FrontPermission> + '_ {
@@ -118,68 +124,128 @@ impl DatabaseSettings {
 }
 
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
-#[serde(default)]
 pub struct NetworkSettings {
-    pub http: Option<HttpSettings>,
-    pub gossipsub: Option<GossipsubSettings>,
+    #[serde(default, skip_serializing_if = "HttpSettings::is_empty")]
+    pub http: HttpSettings,
+
+    #[serde(default, skip_serializing_if = "GossipsubSettings::is_empty")]
+    pub gossipsub: GossipsubSettings,
 }
 
 impl NetworkSettings {
     pub const fn new() -> Self {
         Self {
-            http: None,
-            gossipsub: None,
+            http: HttpSettings::new(),
+            gossipsub: GossipsubSettings::new(),
         }
     }
 
-    pub fn http(&self) -> &HttpSettings {
-        static DEFAULT: HttpSettings = HttpSettings::new();
-
-        self.http.as_ref().unwrap_or(&DEFAULT)
-    }
-
-    pub fn into_http(self) -> HttpSettings {
-        self.http.unwrap_or_default()
-    }
-
-    pub fn gossipsub(&self) -> &GossipsubSettings {
-        static DEFAULT: GossipsubSettings = GossipsubSettings::new();
-
-        self.gossipsub.as_ref().unwrap_or(&DEFAULT)
-    }
-
-    pub fn into_gossipsub(self) -> GossipsubSettings {
-        self.gossipsub.unwrap_or_default()
+    pub const fn is_empty(&self) -> bool {
+        let Self { http, gossipsub } = self;
+        http.is_empty() && gossipsub.is_empty()
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(default)]
+/// The external HTTP access the manifest asks for, separately for either half of the lapp. It only
+/// comes into effect with the `http` permission of that half and for the hosts the user allows.
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
 pub struct HttpSettings {
-    pub methods: HttpMethods,
-    pub hosts: HttpHosts,
-    #[serde(default = "http_timeout_ms")]
-    pub timeout_ms: u64,
-}
+    #[serde(default, skip_serializing_if = "FrontHttpSettings::is_empty")]
+    pub front: FrontHttpSettings,
 
-const fn http_timeout_ms() -> u64 {
-    1000 * 10
+    #[serde(default, skip_serializing_if = "BackHttpSettings::is_empty")]
+    pub back: BackHttpSettings,
 }
 
 impl HttpSettings {
     pub const fn new() -> Self {
         Self {
-            methods: HttpMethods::new(),
-            hosts: HttpHosts::new(),
-            timeout_ms: http_timeout_ms(),
+            front: FrontHttpSettings::new(),
+            back: BackHttpSettings::new(),
         }
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        let Self { front, back } = self;
+        front.is_empty() && back.is_empty()
     }
 }
 
-impl Default for HttpSettings {
+/// The frontend can be limited by hosts only: its requests are filtered by the CSP of its window.
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
+pub struct FrontHttpSettings {
+    #[serde(default, skip_serializing_if = "HttpHosts::is_empty")]
+    pub hosts: HttpHosts,
+}
+
+impl FrontHttpSettings {
+    pub const fn new() -> Self {
+        Self {
+            hosts: HttpHosts::new(),
+        }
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        let Self { hosts } = self;
+        hosts.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct BackHttpSettings {
+    #[serde(default, skip_serializing_if = "HttpHosts::is_empty")]
+    pub hosts: HttpHosts,
+
+    #[serde(default, skip_serializing_if = "HttpMethods::is_empty")]
+    pub methods: HttpMethods,
+
+    #[serde(
+        default = "BackHttpSettings::default_timeout_ms",
+        skip_serializing_if = "BackHttpSettings::is_timeout_default"
+    )]
+    pub timeout_ms: u64,
+}
+
+impl Default for BackHttpSettings {
     fn default() -> Self {
         Self::new()
     }
+}
+
+impl BackHttpSettings {
+    pub const fn new() -> Self {
+        Self {
+            hosts: HttpHosts::new(),
+            methods: HttpMethods::new(),
+            timeout_ms: Self::default_timeout_ms(),
+        }
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        let Self {
+            hosts,
+            methods,
+            timeout_ms,
+        } = self;
+        hosts.is_empty() && methods.is_empty() && Self::is_timeout_default(timeout_ms)
+    }
+
+    const fn is_timeout_default(timeout_ms: &u64) -> bool {
+        *timeout_ms == Self::default_timeout_ms()
+    }
+
+    const fn default_timeout_ms() -> u64 {
+        1000 * 10
+    }
+}
+
+/// Hosts of external HTTP access separately for either half of the lapp: what the user allows of
+/// the manifest, or what comes into effect.
+#[derive(Debug, Default, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct HttpHostsSettings {
+    pub front: HttpHosts,
+    pub back: HttpHosts,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -189,16 +255,13 @@ pub enum HttpMethod {
     Post,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(untagged)]
 pub enum HttpMethods {
+    #[serde(with = "all_str")]
     All,
-    List(Vec<HttpMethod>),
-}
 
-impl HttpMethods {
-    pub const fn new() -> Self {
-        Self::All
-    }
+    List(Vec<HttpMethod>),
 }
 
 impl Default for HttpMethods {
@@ -207,68 +270,24 @@ impl Default for HttpMethods {
     }
 }
 
-impl Serialize for HttpMethods {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        match self {
-            Self::All => serializer.serialize_str("all"),
-            Self::List(methods) => methods.serialize(serializer),
-        }
-    }
-}
-
-struct HttpMethodsVisitor;
-
-impl<'de> de::Visitor<'de> for HttpMethodsVisitor {
-    type Value = HttpMethods;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("an array of HttpMethod or string \"all\".")
-    }
-
-    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        match value.to_lowercase().as_str() {
-            "all" => Ok(HttpMethods::All),
-            value => Err(E::custom(format!("Unknown string value: {value}"))),
-        }
-    }
-
-    fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
-    where
-        A: de::SeqAccess<'de>,
-    {
-        let mut methods = Vec::new();
-        while let Some(method) = sequence.next_element()? {
-            methods.push(method);
-        }
-        Ok(HttpMethods::List(methods))
-    }
-}
-
-impl<'de> Deserialize<'de> for HttpMethods {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_any(HttpMethodsVisitor)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum HttpHosts {
-    All,
-    List(Vec<String>),
-}
-
-impl HttpHosts {
+impl HttpMethods {
     pub const fn new() -> Self {
         Self::All
     }
+
+    pub const fn is_empty(&self) -> bool {
+        matches!(self, Self::List(methods) if methods.is_empty())
+    }
+}
+
+/// Hosts of external HTTP access: `"all"` or a list; empty by default.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum HttpHosts {
+    #[serde(with = "all_str")]
+    All,
+
+    List(Vec<String>),
 }
 
 impl Default for HttpHosts {
@@ -277,55 +296,49 @@ impl Default for HttpHosts {
     }
 }
 
-impl Serialize for HttpHosts {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+impl HttpHosts {
+    pub const fn new() -> Self {
+        Self::List(Vec::new())
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        matches!(self, Self::List(hosts) if hosts.is_empty())
+    }
+
+    /// The hosts of `self` that `allowed`, a choice among them, lets through: `"all"` of it is all
+    /// of `self`, a host of it that `self` does not have is none.
+    pub fn allowed_by(&self, allowed: &Self) -> Self {
+        match (self, allowed) {
+            (Self::All, allowed) => allowed.clone(),
+            (Self::List(hosts), Self::All) => Self::List(hosts.clone()),
+            (Self::List(hosts), Self::List(allowed)) => {
+                Self::List(hosts.iter().filter(|host| allowed.contains(host)).cloned().collect())
+            },
+        }
+    }
+}
+
+mod all_str {
+    use serde::de::Error;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        match self {
-            Self::All => serializer.serialize_str("all"),
-            Self::List(hosts) => hosts.serialize(serializer),
-        }
-    }
-}
-
-struct HttpHostsVisitor;
-
-impl<'de> de::Visitor<'de> for HttpHostsVisitor {
-    type Value = HttpHosts;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("an array of HttpHost or string \"all\".")
+        serializer.serialize_str("all")
     }
 
-    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        match value.to_lowercase().as_str() {
-            "all" => Ok(HttpHosts::All),
-            value => Err(E::custom(format!("Unknown string value: {value}"))),
-        }
-    }
-
-    fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
-    where
-        A: de::SeqAccess<'de>,
-    {
-        let mut methods = Vec::new();
-        while let Some(method) = sequence.next_element()? {
-            methods.push(method);
-        }
-        Ok(HttpHosts::List(methods))
-    }
-}
-
-impl<'de> Deserialize<'de> for HttpHosts {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<(), D::Error>
     where
         D: Deserializer<'de>,
     {
-        deserializer.deserialize_any(HttpHostsVisitor)
+        let value = String::deserialize(deserializer)?;
+        if value.to_lowercase().as_str() == "all" {
+            Ok(())
+        } else {
+            Err(D::Error::custom(format!("Unknown string value: {value}")))
+        }
     }
 }
 
@@ -342,6 +355,11 @@ impl GossipsubSettings {
             addr: String::new(),
             dial_ports: Vec::new(),
         }
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        let Self { addr, dial_ports } = self;
+        addr.is_empty() && dial_ports.is_empty()
     }
 }
 
@@ -368,15 +386,25 @@ pub struct LappRequestsSettings {
 }
 
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
+pub struct LappSettings {
+    #[serde(default, skip_serializing_if = "PermissionsSettings::is_empty")]
+    pub permissions: PermissionsSettings,
+
+    #[serde(default, skip_serializing_if = "NetworkSettings::is_empty")]
+    pub network: NetworkSettings,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lapp_requests: Vec<LappRequestsSettings>,
+}
+
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct LappManifestSettings {
     #[serde(default)]
     pub lapp_name: String,
     pub application: ApplicationSettings,
-    pub required_permissions: PermissionsSettings,
+    pub required: LappSettings,
     pub database: Option<DatabaseSettings>,
-    pub network: Option<NetworkSettings>,
-    pub lapp_requests: Option<Vec<LappRequestsSettings>>,
 }
 
 impl LappManifestSettings {
@@ -403,34 +431,13 @@ impl LappManifestSettings {
     pub fn into_database(self) -> DatabaseSettings {
         self.database.unwrap_or_default()
     }
-
-    pub fn network(&self) -> &NetworkSettings {
-        static DEFAULT: NetworkSettings = NetworkSettings::new();
-
-        self.network.as_ref().unwrap_or(&DEFAULT)
-    }
-
-    pub fn into_network(self) -> NetworkSettings {
-        self.network.unwrap_or_default()
-    }
-
-    pub fn lapp_requests(&self) -> &[LappRequestsSettings] {
-        static DEFAULT: Vec<LappRequestsSettings> = Vec::new();
-
-        self.lapp_requests.as_deref().unwrap_or(&DEFAULT)
-    }
-
-    pub fn into_lapp_requests(self) -> Vec<LappRequestsSettings> {
-        self.lapp_requests.unwrap_or_default()
-    }
 }
 
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct LappUserSettings {
     pub application: ApplicationUserSettings,
-    pub allowed_permissions: PermissionsSettings,
-    pub lapp_requests: Option<Vec<LappRequestsSettings>>,
+    pub allowed: LappSettings,
 }
 
 impl LappUserSettings {
@@ -441,7 +448,8 @@ impl LappUserSettings {
         settings.application.app.title = manifest.application.title.clone();
         settings.application.app.description = manifest.application.description.clone();
         if manifest
-            .required_permissions
+            .required
+            .permissions
             .front
             .contains(&FrontPermission::InvokeBack)
         {
@@ -464,18 +472,48 @@ impl LappUserSettings {
 
     /// The permissions the lapp actually has: the required ones that are allowed or implicit.
     pub fn effective_permissions(&self, manifest: &LappManifestSettings) -> PermissionsSettings {
-        let required = &manifest.required_permissions;
+        let required = &manifest.required.permissions;
         PermissionsSettings {
             front: self
-                .allowed_permissions
+                .allowed
+                .permissions
                 .front_iter()
                 .filter(|permission| permission.is_implicit() || required.front.contains(permission))
                 .collect(),
             back: self
-                .allowed_permissions
+                .allowed
+                .permissions
                 .back_iter()
                 .filter(|permission| permission.is_implicit() || required.back.contains(permission))
                 .collect(),
+        }
+    }
+
+    /// The hosts the lapp actually reaches over HTTP: those of the manifest that the user allows, for
+    /// a half of the lapp that has the effective `http` permission.
+    pub fn effective_http_hosts(&self, manifest: &LappManifestSettings) -> HttpHostsSettings {
+        let permissions = self.effective_permissions(manifest);
+        let requested = &manifest.required.network.http;
+        let allowed = &self.allowed.network.http;
+        let effective = |has_permission: bool, requested: &HttpHosts, allowed: &HttpHosts| {
+            if has_permission {
+                requested.allowed_by(allowed)
+            } else {
+                HttpHosts::new()
+            }
+        };
+
+        HttpHostsSettings {
+            front: effective(
+                permissions.front.contains(&FrontPermission::Http),
+                &requested.front.hosts,
+                &allowed.front.hosts,
+            ),
+            back: effective(
+                permissions.back.contains(&BackPermission::Http),
+                &requested.back.hosts,
+                &allowed.back.hosts,
+            ),
         }
     }
 
@@ -500,7 +538,7 @@ impl LappUserSettings {
         }
 
         if let Some(permission) = query.allow_permission
-            && !((permission.is_implicit() || manifest.required_permissions.contains(permission))
+            && !((permission.is_implicit() || manifest.required.permissions.contains(permission))
                 && self.allow(permission))
         {
             query.allow_permission = None;
@@ -516,7 +554,7 @@ impl LappUserSettings {
     }
 
     pub fn is_allowed(&self, permission: Permission) -> bool {
-        self.allowed_permissions.contains(permission)
+        self.allowed.permissions.contains(permission)
     }
 
     pub fn allow(&mut self, permission: Permission) -> bool {
@@ -568,27 +606,17 @@ impl LappUserSettings {
         self.set_autoload(!self.autoload());
     }
 
-    pub fn lapp_requests(&self) -> &[LappRequestsSettings] {
-        static DEFAULT: Vec<LappRequestsSettings> = Vec::new();
-
-        self.lapp_requests.as_deref().unwrap_or(&DEFAULT)
-    }
-
-    pub fn into_lapp_requests(self) -> Vec<LappRequestsSettings> {
-        self.lapp_requests.unwrap_or_default()
-    }
-
     pub fn is_front_allowed(&self, permission: FrontPermission) -> bool {
-        self.allowed_permissions.front.contains(&permission)
+        self.allowed.permissions.front.contains(&permission)
     }
 
     pub fn is_back_allowed(&self, permission: BackPermission) -> bool {
-        self.allowed_permissions.back.contains(&permission)
+        self.allowed.permissions.back.contains(&permission)
     }
 
     pub fn allow_front(&mut self, permission: FrontPermission) -> bool {
         if !self.is_front_allowed(permission) {
-            self.allowed_permissions.front.push(permission);
+            self.allowed.permissions.front.push(permission);
             true
         } else {
             false
@@ -597,7 +625,7 @@ impl LappUserSettings {
 
     pub fn allow_back(&mut self, permission: BackPermission) -> bool {
         if !self.is_back_allowed(permission) {
-            self.allowed_permissions.back.push(permission);
+            self.allowed.permissions.back.push(permission);
             true
         } else {
             false
@@ -606,12 +634,13 @@ impl LappUserSettings {
 
     pub fn deny_front(&mut self, permission: FrontPermission) -> bool {
         let index = self
-            .allowed_permissions
+            .allowed
+            .permissions
             .front
             .iter()
             .position(|allowed| *allowed == permission);
         if let Some(index) = index {
-            self.allowed_permissions.front.remove(index);
+            self.allowed.permissions.front.remove(index);
             true
         } else {
             false
@@ -620,12 +649,13 @@ impl LappUserSettings {
 
     pub fn deny_back(&mut self, permission: BackPermission) -> bool {
         let index = self
-            .allowed_permissions
+            .allowed
+            .permissions
             .back
             .iter()
             .position(|allowed| *allowed == permission);
         if let Some(index) = index {
-            self.allowed_permissions.back.remove(index);
+            self.allowed.permissions.back.remove(index);
             true
         } else {
             false
@@ -646,6 +676,10 @@ impl LappInfo {
     pub fn effective_permissions(&self) -> PermissionsSettings {
         self.user_settings.effective_permissions(&self.manifest_settings)
     }
+
+    pub fn effective_http_hosts(&self) -> HttpHostsSettings {
+        self.user_settings.effective_http_hosts(&self.manifest_settings)
+    }
 }
 
 #[cfg(test)]
@@ -660,12 +694,69 @@ mod tests {
                 description: Some("A test lapp".into()),
                 ..Default::default()
             },
-            required_permissions: PermissionsSettings {
-                front: front.to_vec(),
-                back: back.to_vec(),
+            required: LappSettings {
+                permissions: PermissionsSettings {
+                    front: front.to_vec(),
+                    back: back.to_vec(),
+                },
+                ..Default::default()
             },
             ..Default::default()
         }
+    }
+
+    fn hosts(hosts: &[&str]) -> HttpHosts {
+        HttpHosts::List(hosts.iter().map(|host| host.to_string()).collect())
+    }
+
+    #[test]
+    fn allowed_hosts_are_a_choice_among_the_requested() {
+        let requested = hosts(&["a.org", "b.org"]);
+
+        assert_eq!(requested.allowed_by(&HttpHosts::All), requested);
+        assert_eq!(requested.allowed_by(&hosts(&["b.org", "c.org"])), hosts(&["b.org"]));
+        assert_eq!(requested.allowed_by(&HttpHosts::new()), HttpHosts::new());
+        assert_eq!(HttpHosts::All.allowed_by(&hosts(&["c.org"])), hosts(&["c.org"]));
+        assert_eq!(HttpHosts::All.allowed_by(&HttpHosts::All), HttpHosts::All);
+        assert!(HttpHosts::new().allowed_by(&HttpHosts::All).is_empty());
+    }
+
+    #[test]
+    fn effective_http_hosts_need_the_permission_and_the_user_choice() {
+        let mut manifest = lapp_settings(&[FrontPermission::Http], &[BackPermission::Http]);
+        manifest.required.network = NetworkSettings {
+            http: HttpSettings {
+                front: FrontHttpSettings {
+                    hosts: hosts(&["cdn.org", "api.org"]),
+                },
+                back: BackHttpSettings {
+                    hosts: HttpHosts::All,
+                    ..BackHttpSettings::new()
+                },
+            },
+            ..NetworkSettings::new()
+        };
+
+        let mut user = LappUserSettings::new(&manifest);
+        assert_eq!(user.effective_http_hosts(&manifest), HttpHostsSettings::default());
+
+        user.allow_front(FrontPermission::Http);
+        user.allowed.network.http = HttpSettings {
+            front: FrontHttpSettings {
+                hosts: hosts(&["api.org", "other.org"]),
+            },
+            back: BackHttpSettings {
+                hosts: hosts(&["any.org"]),
+                ..BackHttpSettings::new()
+            },
+        };
+        assert_eq!(user.effective_http_hosts(&manifest), HttpHostsSettings {
+            front: hosts(&["api.org"]),
+            back: HttpHosts::new(),
+        });
+
+        user.allow_back(BackPermission::Http);
+        assert_eq!(user.effective_http_hosts(&manifest).back, hosts(&["any.org"]));
     }
 
     #[test]
@@ -677,13 +768,13 @@ mod tests {
         assert!(!user.autoload());
         assert_eq!(user.title(), "Test");
         assert_eq!(user.application.app.description.as_deref(), Some("A test lapp"));
-        assert_eq!(user.allowed_permissions, PermissionsSettings {
+        assert_eq!(user.allowed.permissions, PermissionsSettings {
             front: vec![FrontPermission::InvokeBack],
             back: vec![],
         });
 
         let user = LappUserSettings::new(&lapp_settings(&[], &[]));
-        assert_eq!(user.allowed_permissions, PermissionsSettings::default());
+        assert_eq!(user.allowed.permissions, PermissionsSettings::default());
     }
 
     #[test]
