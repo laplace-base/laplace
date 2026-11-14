@@ -77,6 +77,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
+    use crate::lapp::HttpHosts;
     use crate::lapp::access::{BackPermission, FrontPermission};
 
     fn temp_dir(name: &str) -> PathBuf {
@@ -92,12 +93,16 @@ mod tests {
         description = "Notes in markdown"
         tags = ["notes"]
 
-        [required_permissions]
+        [required.permissions]
         front = ["invoke_back"]
         back = ["file_read", "file_write"]
 
-        [network.http]
-        hosts = ["example.org"]
+        [required.network.http.front]
+        hosts = ["cdn.example.org"]
+
+        [required.network.http.back]
+        hosts = "all"
+        methods = ["get"]
         timeout_ms = 500
     "#;
 
@@ -116,12 +121,15 @@ mod tests {
         assert_eq!(manifest.name(), "notes");
         assert_eq!(manifest.application.version, "1.2.0");
         assert_eq!(manifest.title(), "Notes");
-        assert_eq!(manifest.required_permissions.front, [FrontPermission::InvokeBack]);
-        assert_eq!(manifest.required_permissions.back, [
+        assert_eq!(manifest.required.permissions.front, [FrontPermission::InvokeBack]);
+        assert_eq!(manifest.required.permissions.back, [
             BackPermission::FileRead,
             BackPermission::FileWrite
         ]);
-        assert_eq!(manifest.network().http().timeout_ms, 500);
+        let http = manifest.required.network.http;
+        assert_eq!(http.front.hosts, HttpHosts::List(vec!["cdn.example.org".into()]));
+        assert_eq!(http.back.hosts, HttpHosts::All);
+        assert_eq!(http.back.timeout_ms, 500);
 
         fs::remove_dir_all(dir).unwrap();
     }
@@ -132,7 +140,7 @@ mod tests {
         let manifest = LappManifestSettings::load("echo", path).unwrap();
 
         assert_eq!(manifest.title(), "Echo");
-        assert_eq!(manifest.required_permissions.front, [FrontPermission::InvokeBack]);
+        assert_eq!(manifest.required.permissions.front, [FrontPermission::InvokeBack]);
     }
 
     #[test]
@@ -156,7 +164,7 @@ mod tests {
         assert!(user.enabled());
         assert!(!user.autoload());
         assert_eq!(user.title(), "Notes");
-        assert_eq!(user.allowed_permissions.front, [FrontPermission::InvokeBack]);
+        assert_eq!(user.allowed.permissions.front, [FrontPermission::InvokeBack]);
         assert!(!config_path.exists(), "loading must not create the file");
 
         user.application.data_dir = Some("/home/user/Notes".into());
@@ -177,7 +185,7 @@ mod tests {
         let loaded = LappUserSettings::load(&config_path, &manifest).unwrap();
         assert!(loaded.autoload());
         assert_eq!(loaded.title(), "Notes");
-        assert_eq!(loaded.allowed_permissions.front, [FrontPermission::InvokeBack]);
+        assert_eq!(loaded.allowed.permissions.front, [FrontPermission::InvokeBack]);
         assert_eq!(
             loaded.application.data_dir.as_deref(),
             Some(Path::new("/home/user/Notes"))
@@ -196,7 +204,7 @@ mod tests {
             UpdateQuery::new("notes").allow_permission(BackPermission::FileRead)
         );
         let loaded = LappUserSettings::load(&config_path, &manifest).unwrap();
-        assert_eq!(loaded.allowed_permissions.back, [BackPermission::FileRead]);
+        assert_eq!(loaded.allowed.permissions.back, [BackPermission::FileRead]);
 
         fs::remove_dir_all(dir).unwrap();
     }

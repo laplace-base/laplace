@@ -78,7 +78,14 @@ impl FsStoredAssets {
     /// The response of the scheme of the lapp `lapp_name` to a request of the window `webview_label`.
     ///
     /// Only the window of the lapp itself gets anything, and only what [`is_asset_allowed`] lets it.
-    pub fn respond(&self, lapp_name: &str, webview_label: &str, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
+    /// Every file goes out with the `Content-Security-Policy` `csp` of the window.
+    pub fn respond(
+        &self,
+        lapp_name: &str,
+        webview_label: &str,
+        request: &Request<Vec<u8>>,
+        csp: &str,
+    ) -> Response<Vec<u8>> {
         let path = request.uri().path();
         let decoded_path = decode(path);
         if webview_label != lapp_name || !is_asset_allowed(lapp_name, &decoded_path) {
@@ -93,6 +100,7 @@ impl FsStoredAssets {
         match fs::read(&file_path) {
             Ok(content) => Response::builder()
                 .header(header::CONTENT_TYPE, MimeType::parse(&content, path))
+                .header(header::CONTENT_SECURITY_POLICY, csp)
                 .body(content)
                 .expect("the response is valid"),
             Err(err) => {
@@ -215,13 +223,17 @@ mod tests {
 
         let get = |window: &str, uri: &str| {
             let request = Request::get(uri).body(Vec::new()).unwrap();
-            assets.respond("echo", window, &request)
+            assets.respond("echo", window, &request, "default-src 'none'")
         };
 
         let response = get("echo", "lapp-echo://localhost/echo/index.html");
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response.body(), b"echo");
         assert_eq!(response.headers()[header::CONTENT_TYPE], "text/html");
+        assert_eq!(
+            response.headers()[header::CONTENT_SECURITY_POLICY],
+            "default-src 'none'"
+        );
 
         assert_eq!(
             get("notes", "lapp-echo://localhost/echo/index.html").status(),

@@ -318,6 +318,14 @@ impl Lapp {
         }
     }
 
+    /// The `Content-Security-Policy` of the window of the lapp, by its current effective permissions.
+    pub fn csp(&self, name: &str) -> String {
+        let user_settings = self.user_settings_read();
+        let permissions = user_settings.effective_permissions(&self.manifest_settings);
+        let hosts = user_settings.effective_http_hosts(&self.manifest_settings);
+        crate::csp::policy(name, &permissions, &hosts.front)
+    }
+
     fn is_startup_active(&self) -> bool {
         self.manifest_settings
             .is_lapp_startup_active(&self.user_settings_read())

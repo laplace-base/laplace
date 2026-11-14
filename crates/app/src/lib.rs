@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use laplace_settings::LaplaceSettings;
-use laplace_settings::lapp::MAIN_NAME;
+use laplace_settings::lapp::{HttpHosts, MAIN_NAME};
+use tauri::Manager as _;
 
 use crate::assets::{FsStoredAssets, NoAssets};
 pub use crate::lapps::{Lapp, LappError, LappResult, LappState, LappsManager};
@@ -10,6 +11,7 @@ pub use crate::lapps::{Lapp, LappError, LappResult, LappState, LappsManager};
 pub mod android;
 pub mod api;
 pub mod assets;
+pub mod csp;
 pub mod lapps;
 pub mod logging;
 pub mod wasi;
@@ -91,9 +93,15 @@ fn start(lang: String, lapps: LappsManager, assets: FsStoredAssets) {
             move |ctx, request, responder| {
                 let (lapp_name, assets) = (lapp_name.clone(), assets.clone());
                 let webview_label = ctx.webview_label().to_owned();
+                let app = ctx.app_handle().clone();
 
                 tauri::async_runtime::spawn_blocking(move || {
-                    responder.respond(assets.respond(&lapp_name, &webview_label, &request))
+                    // The launcher is not in the registry and needs nothing external.
+                    let csp = app.state::<State>().lapps.lapp(&lapp_name).map_or_else(
+                        || csp::policy(&lapp_name, &Default::default(), &HttpHosts::new()),
+                        |lapp| lapp.csp(&lapp_name),
+                    );
+                    responder.respond(assets.respond(&lapp_name, &webview_label, &request, &csp))
                 });
             },
         );

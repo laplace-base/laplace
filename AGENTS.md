@@ -203,9 +203,11 @@ need its own way to unpack the bundle.
   `[a-z0-9-]` (`laplace_settings::lapp::is_valid_name`); `LappsManager::load` silently skips entries
   starting with `.` and logs an error for other invalid names.
 - `examples/<name>/manifest.toml` — per-lapp manifest (`LappManifestSettings`): application metadata,
-  `required_permissions.front` / `.back`, database, network, lapp-to-lapp requests. The host only
+  and under `[required]` the permissions (`front` / `back`), the network access (`network.http.front` /
+  `.back` hosts) and the lapp-to-lapp requests the lapp asks for; database. The host only
   ever reads it. The user decisions are `LappUserSettings` (`lapps.config_root/<name>.toml`); a
-  missing file means the initial ones (`LappUserSettings::new`). Changes go through `UpdateQuery`;
+  missing file means the initial ones (`LappUserSettings::new`). They have the same shape under
+  `[allowed]` (`LappSettings`): what the user grants of `[required]`. Changes go through `UpdateQuery`;
   the effective permissions are `LappUserSettings::effective_permissions` (docs/domain.md).
   Reading and writing these files (`LappManifestSettings::load`, `LappUserSettings::{load, save, update}`)
   and `LaplaceSettings::new` sit behind the `io` feature of `laplace-settings`, which the host

@@ -3,6 +3,5 @@ title = "Echo"
 description = "The Echo local-first web app example"
 tags = ["example", "echo"]
 
-[required_permissions]
+[required.permissions]
 front = ["invoke_back"]
-back = []

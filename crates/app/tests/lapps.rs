@@ -13,7 +13,7 @@ const MANIFEST: &str = r#"
 [application]
 title = "Test"
 
-[required_permissions]
+[required.permissions]
 front = ["invoke_back"]
 "#;
 
@@ -132,7 +132,7 @@ fn disabled_lapp_fails() {
 #[test]
 fn autoload_starts_at_load_and_the_rest_on_first_request() {
     let user_config = |autoload| {
-        format!("[application]\nautoload = {autoload}\n\n[allowed_permissions]\nfront = [\"invoke_back\"]\n")
+        format!("[application]\nautoload = {autoload}\n\n[allowed.permissions]\nfront = [\"invoke_back\"]\n")
     };
     let fixture = Fixture::new("autoload");
     fixture.lapp("eager", MANIFEST, true, Some(&user_config(true))).lapp(
@@ -179,7 +179,7 @@ fn launcher_is_not_a_registered_lapp() {
 fn lapp_without_invoke_back_is_denied() {
     let fixture = Fixture::new("denied");
     fixture
-        .lapp("revoked", MANIFEST, true, Some("[allowed_permissions]\nfront = []\n"))
+        .lapp("revoked", MANIFEST, true, Some("[allowed.permissions]\nfront = []\n"))
         .lapp("unrequired", "[application]\ntitle = \"Test\"\n", true, None);
     let state = fixture.state();
 

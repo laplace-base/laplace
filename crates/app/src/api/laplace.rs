@@ -1,5 +1,6 @@
 use std::fmt::Display;
 
+use laplace_settings::lapp::access::{FrontPermission, Permission};
 use laplace_settings::lapp::update::UpdateQuery;
 use laplace_settings::lapp::{self, LappInfo};
 use tauri::webview::{DownloadEvent, NewWindowResponse, PageLoadEvent};
@@ -51,10 +52,29 @@ pub async fn update_lapp(
     query: UpdateQuery,
 ) -> Result<UpdateQuery, String> {
     require_launcher(webview_window.label(), "update_lapp").map_err(reject)?;
-    tauri::async_runtime::spawn_blocking(move || app.state::<State>().lapps.update_lapp(query))
+    let handle = app.clone();
+    let updated = tauri::async_runtime::spawn_blocking(move || handle.state::<State>().lapps.update_lapp(query))
         .await
         .map_err(|err| reject(format!("The lapp update task has failed: {err}")))?
-        .map_err(reject)
+        .map_err(reject)?;
+
+    // The policy of a page is fixed when it loads, so an open window takes the new one on reload.
+    let changes_csp = [updated.allow_permission, updated.deny_permission]
+        .into_iter()
+        .flatten()
+        .any(|permission| {
+            matches!(
+                permission,
+                Permission::Front(FrontPermission::Http | FrontPermission::Websocket)
+            )
+        });
+    if changes_csp && let Some(window) = app.get_webview_window(&updated.lapp_name) {
+        window
+            .reload()
+            .unwrap_or_else(|err| log::warn!("Failed to reload the window of lapp '{}': {err}", updated.lapp_name));
+    }
+
+    Ok(updated)
 }
 
 /// Async, since building a window in a synchronous command deadlocks on Windows.
