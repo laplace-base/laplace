@@ -332,3 +332,25 @@ fn vendor_is_not_a_registered_lapp() {
 
     assert!(state.lapps.lapp(VENDOR_NAME).is_none());
 }
+
+#[test]
+fn restarted_backend_is_not_compiled_again() {
+    let fixture = Fixture::new("compiled-once");
+    fixture.lapp("echo", MANIFEST, true, None);
+    let state = fixture.state();
+
+    assert!(get(&state, "echo").is_ok());
+
+    // Without the component file only the compiled backend can answer.
+    fs::remove_file(fixture.settings().back_root.join("echo/echo-back.wasm")).unwrap();
+    for enabled in [false, true] {
+        state
+            .lapps
+            .update_lapp(UpdateQuery::new("echo").enabled(enabled))
+            .unwrap();
+    }
+    assert!(!state.lapps.is_running("echo"));
+
+    assert_eq!(get(&state, "echo").unwrap(), "Echo :////echo/api/hello");
+    assert!(state.lapps.is_running("echo"));
+}

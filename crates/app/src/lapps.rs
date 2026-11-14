@@ -3,6 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockError};
 
+use anyhow::anyhow;
 use laplace_settings::laplace::LappsSettings;
 use laplace_settings::lapp::access::{FrontPermission, Permission};
 use laplace_settings::lapp::file::LappSettingsError;
@@ -13,7 +14,7 @@ use wasmtime::component::{Component, Linker};
 use wasmtime::error::Context;
 use wasmtime::{Engine, Store};
 
-use crate::api::http::{Http, Request, Response};
+use crate::api::http::{Http, HttpPre, Request, Response};
 use crate::wasi::WasiStates;
 
 /// The causes go into the messages, as that is all the frontend gets of an error.
@@ -54,18 +55,30 @@ pub type LappResult<T> = Result<T, LappError>;
 
 /// The registry of the lapps: what their manifests require and what the user has decided, apart
 /// from the instances of their backends, which are started on demand.
-#[derive(Default)]
 pub struct LappsManager {
     engine: Engine,
+    linker: Linker<WasiStates>,
     lapps: HashMap<String, Lapp>,
 }
 
 impl LappsManager {
+    fn new() -> Self {
+        let engine = Engine::default();
+        let mut linker = Linker::new(&engine);
+        wasmtime_wasi::p2::add_to_linker_sync(&mut linker).expect("the WASI imports link");
+
+        Self {
+            engine,
+            linker,
+            lapps: HashMap::new(),
+        }
+    }
+
     /// Registers the founded lapps and starts the backends of those that are enabled and autoloaded.
     ///
     /// A lapp whose manifest or user settings cannot be read is skipped with an error in the log.
     pub fn load(settings: &LappsSettings) -> Self {
-        let mut manager = Self::default();
+        let mut manager = Self::new();
 
         let Ok(read_dir) = fs::read_dir(&settings.back_root).inspect_err(|err| {
             log::error!(
@@ -219,19 +232,30 @@ impl LappsManager {
 
     // The instance of the lapp backend, started if it is not running yet.
     fn instance<'a>(&self, name: &str, lapp: &'a Lapp) -> LappResult<MutexGuard<'a, Option<LappState>>> {
-        let back_path = lapp
-            .back_path
-            .as_deref()
-            .ok_or_else(|| LappError::NoBackend(name.into()))?;
-
         // Only this lapp waits while its component compiles.
         let mut instance = lapp.lock_instance();
         if instance.is_none() {
             log::debug!("Start lapp '{name}'");
-            let state = LappState::load(&self.engine, back_path, name).map_err(|error| LappError::Start {
-                name: name.into(),
-                error,
-            })?;
+
+            let back_path = lapp
+                .back_path
+                .as_deref()
+                .ok_or_else(|| LappError::NoBackend(name.into()))?;
+
+            let compiled = lapp
+                .compiled(&self.engine, &self.linker, back_path)
+                .map_err(|error| LappError::Start {
+                    name: name.into(),
+                    error,
+                })?;
+            let state = compiled
+                .as_ref()
+                .ok_or_else(|| anyhow!("Compiled lapp is none"))
+                .and_then(|pre| LappState::new(&self.engine, name.into(), pre))
+                .map_err(|error| LappError::Start {
+                    name: name.into(),
+                    error,
+                })?;
             *instance = Some(state);
         }
         Ok(instance)
@@ -244,6 +268,7 @@ pub struct Lapp {
     user_settings: RwLock<LappUserSettings>,
     user_config_path: PathBuf,
     back_path: Option<PathBuf>,
+    compiled: Mutex<Option<HttpPre<WasiStates>>>,
     instance: Mutex<Option<LappState>>,
 }
 
@@ -259,6 +284,7 @@ impl Lapp {
             user_settings: RwLock::new(user_settings),
             user_config_path,
             back_path,
+            compiled: Mutex::new(None),
             instance: Mutex::new(None),
         }
     }
@@ -356,6 +382,24 @@ impl Lapp {
         Ok(())
     }
 
+    /// The compiled backend, compiled from `back_path` on the first call; a failure is not kept.
+    fn compiled(
+        &self,
+        engine: &Engine,
+        linker: &Linker<WasiStates>,
+        back_path: &Path,
+    ) -> anyhow::Result<MutexGuard<'_, Option<HttpPre<WasiStates>>>> {
+        let mut compiled = self.compiled.lock().unwrap_or_else(PoisonError::into_inner);
+        if compiled.is_none() {
+            let component = Component::from_file(engine, back_path)
+                .with_context(|| format!("Component file '{}' not found", back_path.display()))?;
+            let pre = HttpPre::new(linker.instantiate_pre(&component)?).context("Failed to link the Http world")?;
+            *compiled = Some(pre);
+        }
+
+        Ok(compiled)
+    }
+
     // A poisoned lock only means that a call has panicked while holding it, which must not make
     // the lapp unreachable for good: its instance reports by itself whether it is still usable.
     fn lock_instance(&self) -> MutexGuard<'_, Option<LappState>> {
@@ -375,24 +419,12 @@ impl LappState {
         root_path.as_ref().join(format!("{name}-back.wasm"))
     }
 
-    /// Loads the component from `path`; the lapp settings are not its concern.
-    pub fn load(engine: &Engine, path: impl AsRef<Path>, name: impl Into<String>) -> anyhow::Result<Self> {
-        let path = path.as_ref();
-        let component = Component::from_file(engine, path)
-            .with_context(|| format!("Component file '{}' not found", path.display()))?;
-
-        Self::new(engine, name.into(), component)
-    }
-
-    pub fn new(engine: &Engine, name: String, component: Component) -> anyhow::Result<Self> {
-        let wasi_states = WasiStates::new();
-        let mut store = Store::new(engine, wasi_states);
-
-        let mut linker = Linker::new(engine);
-        wasmtime_wasi::p2::add_to_linker_sync(&mut linker)?;
-
-        let http_instance =
-            Http::instantiate(&mut store, &component, &linker).context("Failed to instantiate the Http world")?;
+    /// A new instance of the compiled backend `pre`; the lapp settings are not its concern.
+    pub fn new(engine: &Engine, name: String, pre: &HttpPre<WasiStates>) -> anyhow::Result<Self> {
+        let mut store = Store::new(engine, WasiStates::new());
+        let http_instance = pre
+            .instantiate(&mut store)
+            .context("Failed to instantiate the Http world")?;
 
         Ok(Self {
             name,
