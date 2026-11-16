@@ -1,7 +1,8 @@
 use std::collections::HashMap;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockError};
+use std::time::Duration;
+use std::{fs, thread};
 
 use anyhow::anyhow;
 use laplace_settings::laplace::LappsSettings;
@@ -12,7 +13,7 @@ use laplace_settings::lapp::{self, LappInfo, LappManifestSettings, LappUserSetti
 use thiserror::Error;
 use wasmtime::component::{Component, Linker};
 use wasmtime::error::Context;
-use wasmtime::{Engine, Store};
+use wasmtime::{Config, Engine, Store, StoreLimitsBuilder, Trap};
 
 use crate::api::http::{Http, HttpPre, Request, Response};
 use crate::wasi::WasiStates;
@@ -47,6 +48,9 @@ pub enum LappError {
     #[error("Failed to start lapp '{name}': {error:#}")]
     Start { name: String, error: anyhow::Error },
 
+    #[error("Lapp '{name}' did not handle the request in {timeout_ms} ms")]
+    Timeout { name: String, timeout_ms: u64 },
+
     #[error("Lapp '{name}' failed to handle the request: {error:#}")]
     Handle { name: String, error: wasmtime::Error },
 }
@@ -57,18 +61,29 @@ pub type LappResult<T> = Result<T, LappError>;
 /// from the instances of their backends, which are started on demand.
 pub struct LappsManager {
     engine: Engine,
+    limits: InstanceLimits,
     linker: Linker<WasiStates>,
     lapps: HashMap<String, Lapp>,
 }
 
 impl LappsManager {
-    fn new() -> Self {
-        let engine = Engine::default();
+    fn new(settings: &LappsSettings) -> Self {
+        let mut config = Config::new();
+        config.epoch_interruption(true);
+
+        let engine = Engine::new(&config).expect("the engine config is valid");
+        start_epoch_ticker(&engine);
+
         let mut linker = Linker::new(&engine);
         wasmtime_wasi::p2::add_to_linker_sync(&mut linker).expect("the WASI imports link");
 
         Self {
             engine,
+            limits: InstanceLimits {
+                call_timeout_ms: settings.call_timeout_ms,
+                memory_limit_bytes: usize::try_from(settings.memory_limit_mb.saturating_mul(1 << 20))
+                    .unwrap_or(usize::MAX),
+            },
             linker,
             lapps: HashMap::new(),
         }
@@ -78,7 +93,7 @@ impl LappsManager {
     ///
     /// A lapp whose manifest or user settings cannot be read is skipped with an error in the log.
     pub fn load(settings: &LappsSettings) -> Self {
-        let mut manager = Self::new();
+        let mut manager = Self::new(settings);
 
         let Ok(read_dir) = fs::read_dir(&settings.back_root).inspect_err(|err| {
             log::error!(
@@ -224,9 +239,22 @@ impl LappsManager {
         let mut instance = self.instance(name, lapp)?;
         let state = instance.as_mut().expect("the instance was started");
 
-        state.http_handle(request).map_err(|error| LappError::Handle {
-            name: name.into(),
-            error,
+        state.http_handle(request, &self.limits).map_err(|error| {
+            // A component is not entered again after a trap: the next request starts a new instance.
+            *instance = None;
+            log::debug!("Stop lapp '{name}' after a failed call");
+
+            if error.downcast_ref::<Trap>() == Some(&Trap::Interrupt) {
+                LappError::Timeout {
+                    name: name.into(),
+                    timeout_ms: self.limits.call_timeout_ms,
+                }
+            } else {
+                LappError::Handle {
+                    name: name.into(),
+                    error,
+                }
+            }
         })
     }
 
@@ -251,7 +279,7 @@ impl LappsManager {
             let state = compiled
                 .as_ref()
                 .ok_or_else(|| anyhow!("Compiled lapp is none"))
-                .and_then(|pre| LappState::new(&self.engine, name.into(), pre))
+                .and_then(|pre| LappState::new(&self.engine, name.into(), pre, &self.limits))
                 .map_err(|error| LappError::Start {
                     name: name.into(),
                     error,
@@ -259,6 +287,34 @@ impl LappsManager {
             *instance = Some(state);
         }
         Ok(instance)
+    }
+}
+
+/// How often the epoch of the engine advances: the granularity of the call deadline.
+const EPOCH_TICK: Duration = Duration::from_millis(10);
+
+/// Advances the epoch of `engine` until the engine is dropped.
+fn start_epoch_ticker(engine: &Engine) {
+    let engine = engine.weak();
+    thread::spawn(move || {
+        while let Some(engine) = engine.upgrade() {
+            engine.increment_epoch();
+            drop(engine);
+            thread::sleep(EPOCH_TICK);
+        }
+    });
+}
+
+/// The limits of every instance of a lapp backend.
+struct InstanceLimits {
+    call_timeout_ms: u64,
+    memory_limit_bytes: usize,
+}
+
+impl InstanceLimits {
+    /// The deadline of a call in epoch ticks, rounded up.
+    fn deadline_ticks(&self) -> u64 {
+        self.call_timeout_ms.div_ceil(EPOCH_TICK.as_millis() as u64).max(1)
     }
 }
 
@@ -420,8 +476,14 @@ impl LappState {
     }
 
     /// A new instance of the compiled backend `pre`; the lapp settings are not its concern.
-    pub fn new(engine: &Engine, name: String, pre: &HttpPre<WasiStates>) -> anyhow::Result<Self> {
-        let mut store = Store::new(engine, WasiStates::new());
+    fn new(engine: &Engine, name: String, pre: &HttpPre<WasiStates>, limits: &InstanceLimits) -> anyhow::Result<Self> {
+        let mut states = WasiStates::new();
+        states.limits = StoreLimitsBuilder::new().memory_size(limits.memory_limit_bytes).build();
+
+        let mut store = Store::new(engine, states);
+        store.limiter(|states| &mut states.limits);
+        store.set_epoch_deadline(limits.deadline_ticks());
+
         let http_instance = pre
             .instantiate(&mut store)
             .context("Failed to instantiate the Http world")?;
@@ -433,7 +495,8 @@ impl LappState {
         })
     }
 
-    pub fn http_handle(&mut self, request: &Request) -> wasmtime::Result<Response> {
+    fn http_handle(&mut self, request: &Request, limits: &InstanceLimits) -> wasmtime::Result<Response> {
+        self.store.set_epoch_deadline(limits.deadline_ticks());
         self.http_instance
             .laplace_http_by_client_handler()
             .call_handle(&mut self.store, request)

@@ -77,8 +77,9 @@ CI (`.github/workflows/ci.yml`) runs only `cargo make lint` and `cargo make test
 Host tests live in `crates/app/tests/` and run real lapp backends through
 `laplace_app_lib::api::http::process_http` — the `handle_http` path without Tauri. `tests/lapps.rs`
 builds temporary lapp roots (`Fixture`) with the manifests and user settings a test needs and the
-built echo component copied in as each lapp's backend, so `cargo make test` first builds and deploys
-the components (`test-backs`); a new backend a test needs goes there too. Plain `cargo test` fails on
+built echo component copied in as each lapp's backend (`Fixture::lapp_with_back` picks another one:
+`examples/stress` loops on `/loop` and runs out of memory on `/alloc`), so `cargo make test` first
+builds and deploys the components (`test-backs`); a new backend a test needs goes there too. Plain `cargo test` fails on
 a missing component.
 
 **Agents: run builds quietly.** A full build prints hundreds of `Compiling …` lines that only waste
@@ -193,7 +194,8 @@ need its own way to unpack the bundle.
 
 - `Laplace.toml` in the repo root (platform config, **gitignored** — it is a local file, not a template):
   `platform.lang`, `platform.frontend_assets_root` (defaults to `lapps/front`),
-  `log.spec`, `lapps.back_root`, `lapps.config_root`, `lapps.data_root`, `lapps.allowed`. Path is
+  `log.spec`, `lapps.back_root`, `lapps.config_root`, `lapps.data_root`, `lapps.allowed`,
+  `lapps.call_timeout_ms` (call deadline, 10 s) and `lapps.memory_limit_mb` (256 MB per instance). Path is
   overridable with `-c/--config`. Env overrides use the `LAPLACE__` prefix, e.g. `LAPLACE__PLATFORM__LANG=ru`.
 - A lapp lives in four roots (`docs/architecture.md`, «Раскладка на диске»): the author's
   `lapps.back_root/<name>/` (`manifest.toml` + optional `<name>-back.wasm`) and

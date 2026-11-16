@@ -1,5 +1,7 @@
-use std::fs;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use std::{env, fs, process, thread};
 
 use laplace_app_lib::api::http::{HttpError, process_http};
 use laplace_app_lib::{LappError, LappsManager, State};
@@ -24,7 +26,7 @@ struct Fixture {
 
 impl Fixture {
     fn new(test: &str) -> Self {
-        let root = std::env::temp_dir().join(format!("laplace-lapps-{}-{test}", std::process::id()));
+        let root = env::temp_dir().join(format!("laplace-lapps-{}-{test}", process::id()));
         fs::remove_dir_all(&root).ok();
         Self { root }
     }
@@ -34,21 +36,29 @@ impl Fixture {
             back_root: self.root.join("back"),
             config_root: self.root.join("config"),
             data_root: self.root.join("data"),
-            allowed: None,
+            call_timeout_ms: 500,
+            memory_limit_mb: 64,
+            ..Default::default()
         }
     }
 
     fn lapp(&self, name: &str, manifest: &str, back: bool, user_config: Option<&str>) -> &Self {
+        self.lapp_with_back(name, manifest, back.then_some("echo"), user_config)
+    }
+
+    /// A lapp whose backend is the built component of the example `back`.
+    fn lapp_with_back(&self, name: &str, manifest: &str, back: Option<&str>, user_config: Option<&str>) -> &Self {
         let settings = self.settings();
         let lapp_back_dir = settings.back_root.join(name);
 
         fs::create_dir_all(&lapp_back_dir).unwrap();
         fs::write(lapp_back_dir.join("manifest.toml"), manifest).unwrap();
 
-        if back {
-            let echo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../lapps/back/echo/echo-back.wasm");
-            fs::copy(&echo, lapp_back_dir.join(format!("{name}-back.wasm")))
-                .expect("Echo is not built, run `cargo make test`");
+        if let Some(back) = back {
+            let built =
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("../../lapps/back/{back}/{back}-back.wasm"));
+            fs::copy(&built, lapp_back_dir.join(format!("{name}-back.wasm")))
+                .unwrap_or_else(|err| panic!("'{back}' is not built, run `cargo make test`: {err}"));
         }
 
         if let Some(user_config) = user_config {
@@ -353,4 +363,58 @@ fn restarted_backend_is_not_compiled_again() {
 
     assert_eq!(get(&state, "echo").unwrap(), "Echo :////echo/api/hello");
     assert!(state.lapps.is_running("echo"));
+}
+
+fn request(state: &State, lapp_name: &str, path: &str) -> Result<String, HttpError> {
+    let request = Request::get(format!("/{lapp_name}/api/{path}")).build().unwrap();
+    let response = process_http(state, lapp_name, request)?;
+    Ok(String::from_utf8(response.body).unwrap())
+}
+
+#[test]
+fn endless_call_is_interrupted_and_the_lapp_recovers() {
+    let fixture = Fixture::new("deadline");
+    fixture
+        .lapp_with_back("stress", MANIFEST, Some("stress"), None)
+        .lapp("echo", MANIFEST, true, None);
+    let state = Arc::new(fixture.state());
+
+    // Compiled beforehand, so that only the call itself is timed.
+    assert_eq!(request(&state, "stress", "ok").unwrap(), "ok");
+
+    let looping = {
+        let state = state.clone();
+        thread::spawn(move || {
+            let started = Instant::now();
+            (request(&state, "stress", "loop"), started.elapsed())
+        })
+    };
+
+    // Another lapp is not held up by the endless call.
+    assert_eq!(get(&state, "echo").unwrap(), "Echo :////echo/api/hello");
+
+    let (result, elapsed) = looping.join().unwrap();
+    assert!(
+        matches!(result, Err(HttpError::Lapp(LappError::Timeout { ref name, timeout_ms: 500 })) if name == "stress"),
+        "{result:?}"
+    );
+    assert!(elapsed < Duration::from_secs(5), "{elapsed:?}");
+    assert!(!state.lapps.is_running("stress"));
+
+    assert_eq!(request(&state, "stress", "ok").unwrap(), "ok");
+}
+
+#[test]
+fn memory_beyond_the_limit_fails_the_call_only() {
+    let fixture = Fixture::new("memory");
+    fixture.lapp_with_back("stress", MANIFEST, Some("stress"), None);
+    let state = fixture.state();
+
+    assert!(matches!(
+        request(&state, "stress", "alloc"),
+        Err(HttpError::Lapp(LappError::Handle { .. }))
+    ));
+    assert!(!state.lapps.is_running("stress"));
+
+    assert_eq!(request(&state, "stress", "ok").unwrap(), "ok");
 }

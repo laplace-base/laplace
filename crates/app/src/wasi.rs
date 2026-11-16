@@ -1,9 +1,11 @@
+use wasmtime::StoreLimits;
 use wasmtime::component::ResourceTable;
 use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
 pub struct WasiStates {
     table: ResourceTable,
     ctx: WasiCtx,
+    pub limits: StoreLimits,
 }
 
 impl Default for WasiStates {
@@ -11,7 +13,11 @@ impl Default for WasiStates {
         let table = ResourceTable::new();
         let ctx = WasiCtxBuilder::new().build();
 
-        Self { table, ctx }
+        Self {
+            table,
+            ctx,
+            limits: StoreLimits::default(),
+        }
     }
 }
 

@@ -4,6 +4,7 @@ members = [
     "crates/*",
     "examples/echo/back",
     "examples/echo/front",
+    "examples/stress/back",
 ]
 
 [workspace.package]

@@ -335,10 +335,17 @@ dependencies = ["choose-profile"]
 run_task = "clippy"
 dependencies = ["fmt-check"]
 
-[tasks.test-backs]
-description = "Build and deploy the lapp backends the host tests load"
+[tasks.back-echo]
 env = { APP_NAME = "echo" }
 run_task = "back"
+
+[tasks.back-stress]
+env = { APP_NAME = "stress" }
+run_task = "back"
+
+[tasks.test-backs]
+description = "Build and deploy the lapp backends the host tests load"
+dependencies = ["back-echo", "back-stress"]
 
 [tasks.test]
 toolchain = "stable"

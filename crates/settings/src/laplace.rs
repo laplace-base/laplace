@@ -97,6 +97,10 @@ pub struct LappsSettings {
     /// Root of the default lapp data directories.
     pub data_root: PathBuf,
     pub allowed: Option<HashSet<String>>,
+    /// How long a call of a lapp backend may run before it is interrupted.
+    pub call_timeout_ms: u64,
+    /// How much linear memory an instance of a lapp backend may take.
+    pub memory_limit_mb: u64,
 }
 
 impl LappsSettings {
@@ -117,6 +121,8 @@ impl Default for LappsSettings {
             config_root: lapps.join("config"),
             data_root: lapps.join("data"),
             allowed: None,
+            call_timeout_ms: 10_000,
+            memory_limit_mb: 256,
         }
     }
 }

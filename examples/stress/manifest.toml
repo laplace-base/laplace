@@ -1,0 +1,6 @@
+[application]
+title = "Stress"
+description = "A test backend: loops forever on /loop and runs out of memory on /alloc"
+
+[required.permissions]
+front = ["invoke_back"]
