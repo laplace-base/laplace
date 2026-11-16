@@ -8,7 +8,8 @@ Laplace — a local-first web-application platform. A Tauri 2 desktop shell (`la
 hosts sandboxed applications called **lapps**. Each lapp has two halves:
 
 - **back** — a WASI component (`wasm32-wasip1`, built with `cargo component`) run by
-  `wasmtime` inside the host process. It exports the `laplace:http` WIT world (`wit/http.wit`).
+  `wasmtime` inside the host process. It exports the `laplace:http` WIT world `http` (`wit/http.wit`), or `http-init`,
+  which adds the optional `lifecycle.init` the host runs on every new instance.
 - **front** — a `wasm32-unknown-unknown` `wasm-bindgen` module rendering HTML with
   `hypertext` + `wingy-hypertext`, driven client-side by htmx.
 

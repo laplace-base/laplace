@@ -11,7 +11,7 @@ use laplace_settings::lapp::file::LappSettingsError;
 use laplace_settings::lapp::update::UpdateQuery;
 use laplace_settings::lapp::{self, LappInfo, LappManifestSettings, LappUserSettings};
 use thiserror::Error;
-use wasmtime::component::{Component, Linker};
+use wasmtime::component::{Component, ComponentExportIndex, Instance, Linker};
 use wasmtime::error::Context;
 use wasmtime::{Config, Engine, Store, StoreLimitsBuilder, Trap};
 
@@ -48,11 +48,30 @@ pub enum LappError {
     #[error("Failed to start lapp '{name}': {error:#}")]
     Start { name: String, error: anyhow::Error },
 
+    #[error("Lapp '{name}' failed to initialize: {message}")]
+    Init { name: String, message: String },
+
     #[error("Lapp '{name}' did not handle the request in {timeout_ms} ms")]
     Timeout { name: String, timeout_ms: u64 },
 
     #[error("Lapp '{name}' failed to handle the request: {error:#}")]
     Handle { name: String, error: wasmtime::Error },
+}
+
+impl LappError {
+    fn wasm_call(name: impl Into<String>, timeout_ms: u64, error: wasmtime::Error) -> Self {
+        if error.downcast_ref::<Trap>() == Some(&Trap::Interrupt) {
+            LappError::Timeout {
+                name: name.into(),
+                timeout_ms,
+            }
+        } else {
+            LappError::Handle {
+                name: name.into(),
+                error,
+            }
+        }
+    }
 }
 
 pub type LappResult<T> = Result<T, LappError>;
@@ -220,6 +239,18 @@ impl LappsManager {
         Ok(updated)
     }
 
+    pub fn restart_lapp(&self, name: &str) -> LappResult<()> {
+        let lapp = self.lapp(name).ok_or_else(|| LappError::NotFound(name.into()))?;
+
+        if lapp.lock_instance().take().is_some() {
+            log::debug!("Stop lapp '{}'", lapp.manifest_settings.lapp_name);
+        }
+
+        drop(self.instance(name, lapp)?);
+
+        Ok(())
+    }
+
     /// Whether a window may be opened for the lapp `name`.
     pub fn check_open(&self, name: &str) -> LappResult<&Lapp> {
         let lapp = self.lapp(name).ok_or_else(|| LappError::NotFound(name.into()))?;
@@ -239,22 +270,11 @@ impl LappsManager {
         let mut instance = self.instance(name, lapp)?;
         let state = instance.as_mut().expect("the instance was started");
 
-        state.http_handle(request, &self.limits).map_err(|error| {
+        state.http_handle(request, &self.limits).map_err(|err| {
             // A component is not entered again after a trap: the next request starts a new instance.
             *instance = None;
             log::debug!("Stop lapp '{name}' after a failed call");
-
-            if error.downcast_ref::<Trap>() == Some(&Trap::Interrupt) {
-                LappError::Timeout {
-                    name: name.into(),
-                    timeout_ms: self.limits.call_timeout_ms,
-                }
-            } else {
-                LappError::Handle {
-                    name: name.into(),
-                    error,
-                }
-            }
+            LappError::wasm_call(name, self.limits.call_timeout_ms, err)
         })
     }
 
@@ -272,18 +292,30 @@ impl LappsManager {
 
             let compiled = lapp
                 .compiled(&self.engine, &self.linker, back_path)
+                .and_then(|compiled| compiled.clone().ok_or_else(|| anyhow!("Compiled lapp is none")))
                 .map_err(|error| LappError::Start {
                     name: name.into(),
                     error,
                 })?;
-            let state = compiled
-                .as_ref()
-                .ok_or_else(|| anyhow!("Compiled lapp is none"))
-                .and_then(|pre| LappState::new(&self.engine, name.into(), pre, &self.limits))
-                .map_err(|error| LappError::Start {
-                    name: name.into(),
-                    error,
+            let mut state =
+                LappState::new(&self.engine, name.into(), &compiled.pre, &self.limits).map_err(|error| {
+                    LappError::Start {
+                        name: name.into(),
+                        error,
+                    }
                 })?;
+
+            if let Some(init) = compiled.init {
+                let previous_version = lapp.previous_version();
+                state
+                    .init(init, previous_version.as_deref(), &self.limits)
+                    .map_err(|err| LappError::wasm_call(name, self.limits.call_timeout_ms, err))?
+                    .map_err(|message| LappError::Init {
+                        name: name.into(),
+                        message,
+                    })?;
+            }
+            lapp.remember_version();
             *instance = Some(state);
         }
         Ok(instance)
@@ -318,13 +350,24 @@ impl InstanceLimits {
     }
 }
 
+/// The export of the optional `init` (`wit/http.wit`).
+const LIFECYCLE_INTERFACE: &str = "laplace:http/lifecycle";
+
+/// A lapp backend compiled and linked.
+#[derive(Clone)]
+struct Compiled {
+    pre: HttpPre<WasiStates>,
+    /// The `init` of the backend, if it exports one.
+    init: Option<ComponentExportIndex>,
+}
+
 /// A registered lapp.
 pub struct Lapp {
     manifest_settings: LappManifestSettings,
     user_settings: RwLock<LappUserSettings>,
     user_config_path: PathBuf,
     back_path: Option<PathBuf>,
-    compiled: Mutex<Option<HttpPre<WasiStates>>>,
+    compiled: Mutex<Option<Compiled>>,
     instance: Mutex<Option<LappState>>,
 }
 
@@ -408,6 +451,31 @@ impl Lapp {
         crate::csp::policy(name, &permissions, &hosts.front)
     }
 
+    /// The version the lapp last ran with, if it is known and not the one of the manifest.
+    fn previous_version(&self) -> Option<String> {
+        let version = &self.user_settings_read().application.app.version;
+        (!version.is_empty() && *version != self.manifest_settings.application.version).then(|| version.clone())
+    }
+
+    /// Remembers in the user settings that the lapp has run with the version of its manifest.
+    fn remember_version(&self) {
+        let version = &self.manifest_settings.application.version;
+        if self.user_settings_read().application.app.version == *version {
+            return;
+        }
+
+        let mut user_settings = self.user_settings_write();
+        user_settings.application.app.version = version.clone();
+
+        if let Err(err) = user_settings.save(&self.user_config_path) {
+            log::warn!(
+                "Failed to save the version of lapp '{}' to '{}': {err}",
+                self.manifest_settings.lapp_name,
+                self.user_config_path.display()
+            );
+        }
+    }
+
     fn is_startup_active(&self) -> bool {
         self.manifest_settings
             .is_lapp_startup_active(&self.user_settings_read())
@@ -444,13 +512,17 @@ impl Lapp {
         engine: &Engine,
         linker: &Linker<WasiStates>,
         back_path: &Path,
-    ) -> anyhow::Result<MutexGuard<'_, Option<HttpPre<WasiStates>>>> {
+    ) -> anyhow::Result<MutexGuard<'_, Option<Compiled>>> {
         let mut compiled = self.compiled.lock().unwrap_or_else(PoisonError::into_inner);
+
         if compiled.is_none() {
             let component = Component::from_file(engine, back_path)
                 .with_context(|| format!("Component file '{}' not found", back_path.display()))?;
+            let init = component
+                .get_export_index(None, LIFECYCLE_INTERFACE)
+                .and_then(|lifecycle| component.get_export_index(Some(&lifecycle), "init"));
             let pre = HttpPre::new(linker.instantiate_pre(&component)?).context("Failed to link the Http world")?;
-            *compiled = Some(pre);
+            *compiled = Some(Compiled { pre, init });
         }
 
         Ok(compiled)
@@ -467,6 +539,7 @@ impl Lapp {
 pub struct LappState {
     name: String,
     store: Store<WasiStates>,
+    instance: Instance,
     http_instance: Http,
 }
 
@@ -484,15 +557,34 @@ impl LappState {
         store.limiter(|states| &mut states.limits);
         store.set_epoch_deadline(limits.deadline_ticks());
 
-        let http_instance = pre
+        let instance = pre
+            .instance_pre()
             .instantiate(&mut store)
-            .context("Failed to instantiate the Http world")?;
+            .context("Failed to instantiate the component")?;
+        let http_instance = Http::new(&mut store, &instance).context("Failed to instantiate the Http world")?;
 
         Ok(Self {
             name,
             store,
+            instance,
             http_instance,
         })
+    }
+
+    /// Calls the `init` export `init`: a trap is the outer error, a refusal of the backend the inner one.
+    fn init(
+        &mut self,
+        init: ComponentExportIndex,
+        previous_version: Option<&str>,
+        limits: &InstanceLimits,
+    ) -> wasmtime::Result<Result<(), String>> {
+        self.store.set_epoch_deadline(limits.deadline_ticks());
+        let init = self
+            .instance
+            .get_typed_func::<(Option<&str>,), (Result<(), String>,)>(&mut self.store, init)
+            .context("Failed to get the init function")?;
+        let (result,) = init.call(&mut self.store, (previous_version,))?;
+        Ok(result)
     }
 
     fn http_handle(&mut self, request: &Request, limits: &InstanceLimits) -> wasmtime::Result<Response> {

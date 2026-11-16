@@ -1,6 +1,6 @@
 [application]
 title = "Stress"
-description = "A test backend: loops forever on /loop and runs out of memory on /alloc"
+description = "A test backend: loops forever on /loop, runs out of memory on /alloc, tells the last init version on /previous"
 
 [required.permissions]
 front = ["invoke_back"]

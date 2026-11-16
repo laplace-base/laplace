@@ -418,3 +418,70 @@ fn memory_beyond_the_limit_fails_the_call_only() {
 
     assert_eq!(request(&state, "stress", "ok").unwrap(), "ok");
 }
+
+const VERSIONED_MANIFEST: &str = r#"
+[application]
+title = "Test"
+version = "0.2.0"
+
+[required.permissions]
+front = ["invoke_back"]
+"#;
+
+fn user_version(fixture: &Fixture, state: &State, name: &str) -> String {
+    let manifest = state.lapps.lapps().remove(0).manifest_settings;
+    LappUserSettings::load(fixture.settings().user_config_path(name), &manifest)
+        .unwrap()
+        .application
+        .app
+        .version
+}
+
+#[test]
+fn init_gets_the_previous_version_once() {
+    let fixture = Fixture::new("init-upgrade");
+    fixture.lapp_with_back(
+        "stress",
+        VERSIONED_MANIFEST,
+        Some("stress"),
+        Some("[application]\nversion = \"0.1.0\"\n\n[allowed.permissions]\nfront = [\"invoke_back\"]\n"),
+    );
+    let state = fixture.state();
+
+    assert_eq!(request(&state, "stress", "previous").unwrap(), "0.1.0");
+    assert_eq!(user_version(&fixture, &state, "stress"), "0.2.0");
+
+    state.lapps.restart_lapp("stress").unwrap();
+    assert_eq!(request(&state, "stress", "previous").unwrap(), "none");
+}
+
+#[test]
+fn init_of_a_new_lapp_gets_no_version() {
+    let fixture = Fixture::new("init-new");
+    fixture.lapp_with_back("stress", VERSIONED_MANIFEST, Some("stress"), None);
+    let state = fixture.state();
+
+    assert_eq!(request(&state, "stress", "previous").unwrap(), "none");
+    assert_eq!(user_version(&fixture, &state, "stress"), "0.2.0");
+}
+
+#[test]
+fn failed_init_keeps_the_lapp_stopped_and_the_version() {
+    let fixture = Fixture::new("init-fail");
+    fixture.lapp_with_back(
+        "stress",
+        VERSIONED_MANIFEST,
+        Some("stress"),
+        Some("[application]\nversion = \"fail\"\n\n[allowed.permissions]\nfront = [\"invoke_back\"]\n"),
+    );
+    let state = fixture.state();
+
+    let result = request(&state, "stress", "previous");
+    assert!(
+        matches!(&result, Err(HttpError::Lapp(LappError::Init { name, message }))
+            if name == "stress" && message == "init is told to fail"),
+        "{result:?}"
+    );
+    assert!(!state.lapps.is_running("stress"));
+    assert_eq!(user_version(&fixture, &state, "stress"), "fail");
+}

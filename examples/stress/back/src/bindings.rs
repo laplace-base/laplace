@@ -6,6 +6,111 @@
 pub mod exports {
     pub mod laplace {
         pub mod http {
+            /// Optional: a backend that exports it runs `init` on every new instance, before its first request.
+            #[allow(dead_code, async_fn_in_trait, unused_imports, clippy::all)]
+            pub mod lifecycle {
+                #[used]
+                #[doc(hidden)]
+                static __FORCE_SECTION_REF: fn() = super::super::super::super::__link_custom_section_describing_imports;
+                use super::super::super::super::_rt;
+                #[doc(hidden)]
+                #[allow(non_snake_case)]
+                pub unsafe fn _export_init_cabi<T: Guest>(
+                    arg0: i32,
+                    arg1: *mut u8,
+                    arg2: usize,
+                ) -> *mut u8 {
+                    #[cfg(target_arch = "wasm32")] _rt::run_ctors_once();
+                    let result1 = T::init(
+                        match arg0 {
+                            0 => None,
+                            1 => {
+                                let e = {
+                                    let len0 = arg2;
+                                    let bytes0 = _rt::Vec::from_raw_parts(
+                                        arg1.cast(),
+                                        len0,
+                                        len0,
+                                    );
+                                    _rt::string_lift(bytes0)
+                                };
+                                Some(e)
+                            }
+                            _ => _rt::invalid_enum_discriminant(),
+                        },
+                    );
+                    let ptr2 = (&raw mut _RET_AREA.0).cast::<u8>();
+                    match result1 {
+                        Ok(_) => {
+                            *ptr2.add(0).cast::<u8>() = (0i32) as u8;
+                        }
+                        Err(e) => {
+                            *ptr2.add(0).cast::<u8>() = (1i32) as u8;
+                            let vec3 = (e.into_bytes()).into_boxed_slice();
+                            let ptr3 = vec3.as_ptr().cast::<u8>();
+                            let len3 = vec3.len();
+                            ::core::mem::forget(vec3);
+                            *ptr2
+                                .add(2 * ::core::mem::size_of::<*const u8>())
+                                .cast::<usize>() = len3;
+                            *ptr2
+                                .add(::core::mem::size_of::<*const u8>())
+                                .cast::<*mut u8>() = ptr3.cast_mut();
+                        }
+                    };
+                    ptr2
+                }
+                #[doc(hidden)]
+                #[allow(non_snake_case)]
+                pub unsafe fn __post_return_init<T: Guest>(arg0: *mut u8) {
+                    let l0 = i32::from(*arg0.add(0).cast::<u8>());
+                    match l0 {
+                        0 => {}
+                        _ => {
+                            let l1 = *arg0
+                                .add(::core::mem::size_of::<*const u8>())
+                                .cast::<*mut u8>();
+                            let l2 = *arg0
+                                .add(2 * ::core::mem::size_of::<*const u8>())
+                                .cast::<usize>();
+                            _rt::cabi_dealloc(l1, l2, 1);
+                        }
+                    }
+                }
+                pub trait Guest {
+                    /// `previous-version` is the version the lapp last ran with, if it was another one: the data may
+                    /// need to be brought to the current format. `init` should be idempotent.
+                    fn init(
+                        previous_version: Option<_rt::String>,
+                    ) -> Result<(), _rt::String>;
+                }
+                #[doc(hidden)]
+                macro_rules! __export_laplace_http_lifecycle_cabi {
+                    ($ty:ident with_types_in $($path_to_types:tt)*) => {
+                        const _ : () = { #[unsafe (export_name =
+                        "laplace:http/lifecycle#init")] unsafe extern "C" fn
+                        export_init(arg0 : i32, arg1 : * mut u8, arg2 : usize,) -> * mut
+                        u8 { unsafe { $($path_to_types)*:: _export_init_cabi::<$ty >
+                        (arg0, arg1, arg2) } } #[unsafe (export_name =
+                        "cabi_post_laplace:http/lifecycle#init")] unsafe extern "C" fn
+                        _post_return_init(arg0 : * mut u8,) { unsafe {
+                        $($path_to_types)*:: __post_return_init::<$ty > (arg0) } } };
+                    };
+                }
+                #[doc(hidden)]
+                pub(crate) use __export_laplace_http_lifecycle_cabi;
+                #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
+                #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
+                struct _RetArea(
+                    [::core::mem::MaybeUninit<
+                        u8,
+                    >; 3 * ::core::mem::size_of::<*const u8>()],
+                );
+                static mut _RET_AREA: _RetArea = _RetArea(
+                    [::core::mem::MaybeUninit::uninit(); 3
+                        * ::core::mem::size_of::<*const u8>()],
+                );
+            }
             #[allow(dead_code, async_fn_in_trait, unused_imports, clippy::all)]
             pub mod types {
                 #[used]
@@ -399,17 +504,23 @@ pub mod exports {
 #[rustfmt::skip]
 mod _rt {
     #![allow(dead_code, clippy::all)]
-    pub use alloc_crate::string::String;
-    pub use alloc_crate::vec::Vec;
     #[cfg(target_arch = "wasm32")]
     pub fn run_ctors_once() {
         wit_bindgen_rt::run_ctors_once();
     }
+    pub use alloc_crate::vec::Vec;
     pub unsafe fn string_lift(bytes: Vec<u8>) -> String {
         if cfg!(debug_assertions) {
             String::from_utf8(bytes).unwrap()
         } else {
             String::from_utf8_unchecked(bytes)
+        }
+    }
+    pub unsafe fn invalid_enum_discriminant<T>() -> T {
+        if cfg!(debug_assertions) {
+            panic!("invalid enum discriminant")
+        } else {
+            unsafe { core::hint::unreachable_unchecked() }
         }
     }
     pub unsafe fn cabi_dealloc(ptr: *mut u8, size: usize, align: usize) {
@@ -419,6 +530,7 @@ mod _rt {
         let layout = alloc::Layout::from_size_align_unchecked(size, align);
         alloc::dealloc(ptr, layout);
     }
+    pub use alloc_crate::string::String;
     pub fn as_i32<T: AsI32>(t: T) -> i32 {
         t.as_i32()
     }
@@ -499,11 +611,14 @@ mod _rt {
 /// ```
 #[allow(unused_macros)]
 #[doc(hidden)]
-macro_rules! __export_http_impl {
+macro_rules! __export_http_init_impl {
     ($ty:ident) => {
         self::export!($ty with_types_in self);
     };
     ($ty:ident with_types_in $($path_to_types_root:tt)*) => {
+        $($path_to_types_root)*::
+        exports::laplace::http::lifecycle::__export_laplace_http_lifecycle_cabi!($ty
+        with_types_in $($path_to_types_root)*:: exports::laplace::http::lifecycle);
         $($path_to_types_root)*::
         exports::laplace::http::types::__export_laplace_http_types_cabi!($ty
         with_types_in $($path_to_types_root)*:: exports::laplace::http::types);
@@ -514,27 +629,28 @@ macro_rules! __export_http_impl {
     };
 }
 #[doc(inline)]
-pub(crate) use __export_http_impl as export;
+pub(crate) use __export_http_init_impl as export;
 #[cfg(target_arch = "wasm32")]
 #[unsafe(
-    link_section = "component-type:wit-bindgen:0.41.0:laplace:http:http:encoded world"
+    link_section = "component-type:wit-bindgen:0.41.0:laplace:http:http-init:encoded world"
 )]
 #[doc(hidden)]
 #[allow(clippy::octal_escapes)]
-pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 553] = *b"\
-\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\xae\x03\x01A\x02\x01\
-A\x06\x01B\x0c\x01m\x09\x07options\x03get\x04post\x03put\x06delete\x04head\x05tr\
-ace\x07connect\x05patch\x04\0\x06method\x03\0\0\x01r\x03\x06schemes\x09authority\
-s\x0epath-and-querys\x04\0\x03uri\x03\0\x02\x01p}\x01r\x02\x04names\x05value\x04\
-\x04\0\x06header\x03\0\x05\x01p\x06\x01r\x05\x06method\x01\x03uri\x03\x07version\
-s\x07headers\x07\x04body\x04\x04\0\x07request\x03\0\x08\x01r\x04\x06status{\x07v\
-ersions\x07headers\x07\x04body\x04\x04\0\x08response\x03\0\x0a\x04\0\x12laplace:\
-http/types\x05\0\x02\x03\0\0\x07request\x02\x03\0\0\x08response\x01B\x06\x02\x03\
-\x02\x01\x01\x04\0\x07request\x03\0\0\x02\x03\x02\x01\x02\x04\0\x08response\x03\0\
-\x02\x01@\x01\x07request\x01\0\x03\x04\0\x06handle\x01\x04\x04\0\x1elaplace:http\
-/by-client-handler\x05\x03\x04\0\x11laplace:http/http\x04\0\x0b\x0a\x01\0\x04htt\
-p\x03\0\0\0G\x09producers\x01\x0cprocessed-by\x02\x0dwit-component\x070.227.1\x10\
-wit-bindgen-rust\x060.41.0";
+pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 633] = *b"\
+\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\xf9\x03\x01A\x02\x01\
+A\x08\x01B\x04\x01ks\x01j\0\x01s\x01@\x01\x10previous-version\0\0\x01\x04\0\x04i\
+nit\x01\x02\x04\0\x16laplace:http/lifecycle\x05\0\x01B\x0c\x01m\x09\x07options\x03\
+get\x04post\x03put\x06delete\x04head\x05trace\x07connect\x05patch\x04\0\x06metho\
+d\x03\0\0\x01r\x03\x06schemes\x09authoritys\x0epath-and-querys\x04\0\x03uri\x03\0\
+\x02\x01p}\x01r\x02\x04names\x05value\x04\x04\0\x06header\x03\0\x05\x01p\x06\x01\
+r\x05\x06method\x01\x03uri\x03\x07versions\x07headers\x07\x04body\x04\x04\0\x07r\
+equest\x03\0\x08\x01r\x04\x06status{\x07versions\x07headers\x07\x04body\x04\x04\0\
+\x08response\x03\0\x0a\x04\0\x12laplace:http/types\x05\x01\x02\x03\0\x01\x07requ\
+est\x02\x03\0\x01\x08response\x01B\x06\x02\x03\x02\x01\x02\x04\0\x07request\x03\0\
+\0\x02\x03\x02\x01\x03\x04\0\x08response\x03\0\x02\x01@\x01\x07request\x01\0\x03\
+\x04\0\x06handle\x01\x04\x04\0\x1elaplace:http/by-client-handler\x05\x04\x04\0\x16\
+laplace:http/http-init\x04\0\x0b\x0f\x01\0\x09http-init\x03\0\0\0G\x09producers\x01\
+\x0cprocessed-by\x02\x0dwit-component\x070.227.1\x10wit-bindgen-rust\x060.41.0";
 #[inline(never)]
 #[doc(hidden)]
 pub fn __link_custom_section_describing_imports() {

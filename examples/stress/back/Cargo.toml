@@ -9,6 +9,7 @@ description = "A backend the host tests drive into an endless loop or out of mem
 
     [package.metadata.component.target]
     path = "../../../wit"
+    world = "http-init"
 
 [lib]
 crate-type = ["cdylib"]

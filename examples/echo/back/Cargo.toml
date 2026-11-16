@@ -9,6 +9,7 @@ description = "The Echo lapp example"
 
     [package.metadata.component.target]
     path = "../../../wit"
+    world = "http"
 
 [lib]
 crate-type = ["cdylib"]
