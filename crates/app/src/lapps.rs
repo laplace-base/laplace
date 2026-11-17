@@ -4,7 +4,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError, RwLock, RwLockReadGuard, RwLockW
 use std::time::Duration;
 use std::{fs, thread};
 
-use anyhow::anyhow;
+use anyhow::{anyhow, bail};
 use laplace_settings::laplace::LappsSettings;
 use laplace_settings::lapp::access::{FrontPermission, Permission};
 use laplace_settings::lapp::file::LappSettingsError;
@@ -15,7 +15,7 @@ use wasmtime::component::{Component, ComponentExportIndex, Instance, Linker};
 use wasmtime::error::Context;
 use wasmtime::{Config, Engine, Store, StoreLimitsBuilder, Trap};
 
-use crate::api::http::{Http, HttpPre, Request, Response};
+use crate::api::http::{Back, BackPre, Request, Response};
 use crate::wasi::WasiStates;
 
 /// The causes go into the messages, as that is all the frontend gets of an error.
@@ -350,13 +350,17 @@ impl InstanceLimits {
     }
 }
 
-/// The export of the optional `init` (`wit/http.wit`).
-const LIFECYCLE_INTERFACE: &str = "laplace:http/lifecycle";
+/// The export every backend has (`wit/handler.wit`). The version is part of the export name, and
+/// there is no semver matching of exports: a backend built for another version is not linked.
+const HANDLER_INTERFACE: &str = "laplace:lapp/handler@0.1.0";
+
+/// The export of the optional `init` (`wit/lifecycle.wit`).
+const LIFECYCLE_INTERFACE: &str = "laplace:lapp/lifecycle@0.1.0";
 
 /// A lapp backend compiled and linked.
 #[derive(Clone)]
 struct Compiled {
-    pre: HttpPre<WasiStates>,
+    pre: BackPre<WasiStates>,
     /// The `init` of the backend, if it exports one.
     init: Option<ComponentExportIndex>,
 }
@@ -518,10 +522,13 @@ impl Lapp {
         if compiled.is_none() {
             let component = Component::from_file(engine, back_path)
                 .with_context(|| format!("Component file '{}' not found", back_path.display()))?;
+            if component.get_export_index(None, HANDLER_INTERFACE).is_none() {
+                bail!("The backend is built for another contract: it does not export '{HANDLER_INTERFACE}'");
+            }
             let init = component
                 .get_export_index(None, LIFECYCLE_INTERFACE)
                 .and_then(|lifecycle| component.get_export_index(Some(&lifecycle), "init"));
-            let pre = HttpPre::new(linker.instantiate_pre(&component)?).context("Failed to link the Http world")?;
+            let pre = BackPre::new(linker.instantiate_pre(&component)?).context("Failed to link the back world")?;
             *compiled = Some(Compiled { pre, init });
         }
 
@@ -540,7 +547,7 @@ pub struct LappState {
     name: String,
     store: Store<WasiStates>,
     instance: Instance,
-    http_instance: Http,
+    back_instance: Back,
 }
 
 impl LappState {
@@ -549,7 +556,7 @@ impl LappState {
     }
 
     /// A new instance of the compiled backend `pre`; the lapp settings are not its concern.
-    fn new(engine: &Engine, name: String, pre: &HttpPre<WasiStates>, limits: &InstanceLimits) -> anyhow::Result<Self> {
+    fn new(engine: &Engine, name: String, pre: &BackPre<WasiStates>, limits: &InstanceLimits) -> anyhow::Result<Self> {
         let mut states = WasiStates::new(&name);
         states.limits = StoreLimitsBuilder::new().memory_size(limits.memory_limit_bytes).build();
 
@@ -561,13 +568,13 @@ impl LappState {
             .instance_pre()
             .instantiate(&mut store)
             .context("Failed to instantiate the component")?;
-        let http_instance = Http::new(&mut store, &instance).context("Failed to instantiate the Http world")?;
+        let back_instance = Back::new(&mut store, &instance).context("Failed to instantiate the back world")?;
 
         Ok(Self {
             name,
             store,
             instance,
-            http_instance,
+            back_instance,
         })
     }
 
@@ -591,8 +598,8 @@ impl LappState {
     fn http_handle(&mut self, request: &Request, limits: &InstanceLimits) -> wasmtime::Result<Response> {
         self.store.set_epoch_deadline(limits.deadline_ticks());
         let response = self
-            .http_instance
-            .laplace_http_by_client_handler()
+            .back_instance
+            .laplace_lapp_handler()
             .call_handle(&mut self.store, request)
             .context("Failed to call http::handle function");
         self.store.data().flush_output();

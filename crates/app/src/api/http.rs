@@ -3,13 +3,13 @@ use tauri::{AppHandle, Manager as _};
 use thiserror::Error;
 use wasmtime::component::bindgen;
 
-pub use self::exports::laplace::http::types::{Header, Method, Request, Response, Uri};
+pub use self::exports::laplace::lapp::types::{Header, Method, Request, Response, Uri};
 use crate::State;
 use crate::lapps::LappError;
 
 bindgen!({
-    path: "../../wit/http.wit",
-    world: "http"
+    path: "../../wit",
+    world: "back"
 });
 
 mod convert {

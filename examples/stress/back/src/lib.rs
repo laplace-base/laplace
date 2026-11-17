@@ -7,8 +7,8 @@
 
 use std::sync::Mutex;
 
-use crate::bindings::exports::laplace::http::by_client_handler::{Guest, Request, Response};
-use crate::bindings::exports::laplace::http::lifecycle::Guest as LifecycleGuest;
+use crate::bindings::exports::laplace::lapp::handler::{Guest, Request, Response};
+use crate::bindings::exports::laplace::lapp::lifecycle::Guest as LifecycleGuest;
 
 #[allow(warnings)]
 #[rustfmt::skip]

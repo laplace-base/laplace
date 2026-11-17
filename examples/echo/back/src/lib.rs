@@ -1,4 +1,4 @@
-use crate::bindings::exports::laplace::http::by_client_handler::{Guest, Request, Response};
+use crate::bindings::exports::laplace::lapp::handler::{Guest, Request, Response};
 
 #[allow(warnings)]
 #[rustfmt::skip]

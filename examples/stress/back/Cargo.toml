@@ -9,7 +9,7 @@ description = "A backend the host tests"
 
     [package.metadata.component.target]
     path = "../../../wit"
-    world = "http-init"
+    world = "back-init"
 
 [lib]
 crate-type = ["cdylib"]

@@ -1,0 +1,8 @@
+package laplace:lapp@0.1.0;
+
+/// The entry point of a backend: every request of its frontend (`handle_http`) is a call of `handle`.
+interface handler {
+    use types.{request, response};
+
+    handle: func(request: request) -> response;
+}

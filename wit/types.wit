@@ -1,0 +1,43 @@
+package laplace:lapp@0.1.0;
+
+/// The HTTP request a frontend sends to its backend and the response it gets.
+interface types {
+    enum method {
+        options,
+        get,
+        post,
+        put,
+        delete,
+        head,
+        trace,
+        connect,
+        patch,
+    }
+
+    record uri {
+        scheme: string,
+        authority: string,
+        path-and-query: string,
+    }
+
+    record header {
+        name: string,
+        value: list<u8>,
+    }
+
+    record request {
+        method: method,
+        uri: uri,
+        version: string,
+        headers: list<header>,
+        body: list<u8>,
+    }
+
+    record response {
+        status: u16,
+        version: string,
+        headers: list<header>,
+        body: list<u8>,
+    }
+
+}

@@ -5,7 +5,7 @@
 #[allow(dead_code, clippy::all)]
 pub mod exports {
     pub mod laplace {
-        pub mod http {
+        pub mod lapp {
             /// Optional: a backend that exports it runs `init` on every new instance, before its first request.
             #[allow(dead_code, async_fn_in_trait, unused_imports, clippy::all)]
             pub mod lifecycle {
@@ -85,20 +85,20 @@ pub mod exports {
                     ) -> Result<(), _rt::String>;
                 }
                 #[doc(hidden)]
-                macro_rules! __export_laplace_http_lifecycle_cabi {
+                macro_rules! __export_laplace_lapp_lifecycle_0_1_0_cabi {
                     ($ty:ident with_types_in $($path_to_types:tt)*) => {
                         const _ : () = { #[unsafe (export_name =
-                        "laplace:http/lifecycle#init")] unsafe extern "C" fn
+                        "laplace:lapp/lifecycle@0.1.0#init")] unsafe extern "C" fn
                         export_init(arg0 : i32, arg1 : * mut u8, arg2 : usize,) -> * mut
                         u8 { unsafe { $($path_to_types)*:: _export_init_cabi::<$ty >
                         (arg0, arg1, arg2) } } #[unsafe (export_name =
-                        "cabi_post_laplace:http/lifecycle#init")] unsafe extern "C" fn
-                        _post_return_init(arg0 : * mut u8,) { unsafe {
+                        "cabi_post_laplace:lapp/lifecycle@0.1.0#init")] unsafe extern "C"
+                        fn _post_return_init(arg0 : * mut u8,) { unsafe {
                         $($path_to_types)*:: __post_return_init::<$ty > (arg0) } } };
                     };
                 }
                 #[doc(hidden)]
-                pub(crate) use __export_laplace_http_lifecycle_cabi;
+                pub(crate) use __export_laplace_lapp_lifecycle_0_1_0_cabi;
                 #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
                 #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
                 struct _RetArea(
@@ -111,6 +111,7 @@ pub mod exports {
                         * ::core::mem::size_of::<*const u8>()],
                 );
             }
+            /// The HTTP request a frontend sends to its backend and the response it gets.
             #[allow(dead_code, async_fn_in_trait, unused_imports, clippy::all)]
             pub mod types {
                 #[used]
@@ -245,22 +246,23 @@ pub mod exports {
                     }
                 }
                 #[doc(hidden)]
-                macro_rules! __export_laplace_http_types_cabi {
+                macro_rules! __export_laplace_lapp_types_0_1_0_cabi {
                     ($ty:ident with_types_in $($path_to_types:tt)*) => {
                         const _ : () = {};
                     };
                 }
                 #[doc(hidden)]
-                pub(crate) use __export_laplace_http_types_cabi;
+                pub(crate) use __export_laplace_lapp_types_0_1_0_cabi;
             }
+            /// The entry point of a backend: every request of its frontend (`handle_http`) is a call of `handle`.
             #[allow(dead_code, async_fn_in_trait, unused_imports, clippy::all)]
-            pub mod by_client_handler {
+            pub mod handler {
                 #[used]
                 #[doc(hidden)]
                 static __FORCE_SECTION_REF: fn() = super::super::super::super::__link_custom_section_describing_imports;
                 use super::super::super::super::_rt;
-                pub type Request = super::super::super::super::exports::laplace::http::types::Request;
-                pub type Response = super::super::super::super::exports::laplace::http::types::Response;
+                pub type Request = super::super::super::super::exports::laplace::lapp::types::Request;
+                pub type Response = super::super::super::super::exports::laplace::lapp::types::Response;
                 #[doc(hidden)]
                 #[allow(non_snake_case)]
                 pub unsafe fn _export_handle_cabi<T: Guest>(
@@ -307,7 +309,7 @@ pub mod exports {
                                 .add(3 * ::core::mem::size_of::<*const u8>())
                                 .cast::<usize>();
                             let len9 = l8;
-                            super::super::super::super::exports::laplace::http::types::Header {
+                            super::super::super::super::exports::laplace::lapp::types::Header {
                                 name: _rt::string_lift(bytes6),
                                 value: _rt::Vec::from_raw_parts(l7.cast(), len9, len9),
                             }
@@ -320,11 +322,11 @@ pub mod exports {
                         ::core::mem::size_of::<*const u8>(),
                     );
                     let len11 = arg12;
-                    let result12 = T::handle(super::super::super::super::exports::laplace::http::types::Request {
-                        method: super::super::super::super::exports::laplace::http::types::Method::_lift(
+                    let result12 = T::handle(super::super::super::super::exports::laplace::lapp::types::Request {
+                        method: super::super::super::super::exports::laplace::lapp::types::Method::_lift(
                             arg0 as u8,
                         ),
-                        uri: super::super::super::super::exports::laplace::http::types::Uri {
+                        uri: super::super::super::super::exports::laplace::lapp::types::Uri {
                             scheme: _rt::string_lift(bytes0),
                             authority: _rt::string_lift(bytes1),
                             path_and_query: _rt::string_lift(bytes2),
@@ -334,7 +336,7 @@ pub mod exports {
                         body: _rt::Vec::from_raw_parts(arg11.cast(), len11, len11),
                     });
                     let ptr13 = (&raw mut _RET_AREA.0).cast::<u8>();
-                    let super::super::super::super::exports::laplace::http::types::Response {
+                    let super::super::super::super::exports::laplace::lapp::types::Response {
                         status: status14,
                         version: version14,
                         headers: headers14,
@@ -369,7 +371,7 @@ pub mod exports {
                         let base = result19
                             .add(i * (4 * ::core::mem::size_of::<*const u8>()));
                         {
-                            let super::super::super::super::exports::laplace::http::types::Header {
+                            let super::super::super::super::exports::laplace::lapp::types::Header {
                                 name: name16,
                                 value: value16,
                             } = e;
@@ -468,24 +470,24 @@ pub mod exports {
                     fn handle(request: Request) -> Response;
                 }
                 #[doc(hidden)]
-                macro_rules! __export_laplace_http_by_client_handler_cabi {
+                macro_rules! __export_laplace_lapp_handler_0_1_0_cabi {
                     ($ty:ident with_types_in $($path_to_types:tt)*) => {
                         const _ : () = { #[unsafe (export_name =
-                        "laplace:http/by-client-handler#handle")] unsafe extern "C" fn
+                        "laplace:lapp/handler@0.1.0#handle")] unsafe extern "C" fn
                         export_handle(arg0 : i32, arg1 : * mut u8, arg2 : usize, arg3 : *
                         mut u8, arg4 : usize, arg5 : * mut u8, arg6 : usize, arg7 : * mut
                         u8, arg8 : usize, arg9 : * mut u8, arg10 : usize, arg11 : * mut
                         u8, arg12 : usize,) -> * mut u8 { unsafe { $($path_to_types)*::
                         _export_handle_cabi::<$ty > (arg0, arg1, arg2, arg3, arg4, arg5,
                         arg6, arg7, arg8, arg9, arg10, arg11, arg12) } } #[unsafe
-                        (export_name =
-                        "cabi_post_laplace:http/by-client-handler#handle")] unsafe extern
-                        "C" fn _post_return_handle(arg0 : * mut u8,) { unsafe {
-                        $($path_to_types)*:: __post_return_handle::<$ty > (arg0) } } };
+                        (export_name = "cabi_post_laplace:lapp/handler@0.1.0#handle")]
+                        unsafe extern "C" fn _post_return_handle(arg0 : * mut u8,) {
+                        unsafe { $($path_to_types)*:: __post_return_handle::<$ty > (arg0)
+                        } } };
                     };
                 }
                 #[doc(hidden)]
-                pub(crate) use __export_laplace_http_by_client_handler_cabi;
+                pub(crate) use __export_laplace_lapp_handler_0_1_0_cabi;
                 #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
                 #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
                 struct _RetArea(
@@ -611,46 +613,46 @@ mod _rt {
 /// ```
 #[allow(unused_macros)]
 #[doc(hidden)]
-macro_rules! __export_http_init_impl {
+macro_rules! __export_back_init_impl {
     ($ty:ident) => {
         self::export!($ty with_types_in self);
     };
     ($ty:ident with_types_in $($path_to_types_root:tt)*) => {
         $($path_to_types_root)*::
-        exports::laplace::http::lifecycle::__export_laplace_http_lifecycle_cabi!($ty
-        with_types_in $($path_to_types_root)*:: exports::laplace::http::lifecycle);
+        exports::laplace::lapp::lifecycle::__export_laplace_lapp_lifecycle_0_1_0_cabi!($ty
+        with_types_in $($path_to_types_root)*:: exports::laplace::lapp::lifecycle);
         $($path_to_types_root)*::
-        exports::laplace::http::types::__export_laplace_http_types_cabi!($ty
-        with_types_in $($path_to_types_root)*:: exports::laplace::http::types);
+        exports::laplace::lapp::types::__export_laplace_lapp_types_0_1_0_cabi!($ty
+        with_types_in $($path_to_types_root)*:: exports::laplace::lapp::types);
         $($path_to_types_root)*::
-        exports::laplace::http::by_client_handler::__export_laplace_http_by_client_handler_cabi!($ty
-        with_types_in $($path_to_types_root)*::
-        exports::laplace::http::by_client_handler);
+        exports::laplace::lapp::handler::__export_laplace_lapp_handler_0_1_0_cabi!($ty
+        with_types_in $($path_to_types_root)*:: exports::laplace::lapp::handler);
     };
 }
 #[doc(inline)]
-pub(crate) use __export_http_init_impl as export;
+pub(crate) use __export_back_init_impl as export;
 #[cfg(target_arch = "wasm32")]
 #[unsafe(
-    link_section = "component-type:wit-bindgen:0.41.0:laplace:http:http-init:encoded world"
+    link_section = "component-type:wit-bindgen:0.41.0:laplace:lapp@0.1.0:back-init:encoded world"
 )]
 #[doc(hidden)]
 #[allow(clippy::octal_escapes)]
-pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 633] = *b"\
-\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\xf9\x03\x01A\x02\x01\
+pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 647] = *b"\
+\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\x87\x04\x01A\x02\x01\
 A\x08\x01B\x04\x01ks\x01j\0\x01s\x01@\x01\x10previous-version\0\0\x01\x04\0\x04i\
-nit\x01\x02\x04\0\x16laplace:http/lifecycle\x05\0\x01B\x0c\x01m\x09\x07options\x03\
-get\x04post\x03put\x06delete\x04head\x05trace\x07connect\x05patch\x04\0\x06metho\
-d\x03\0\0\x01r\x03\x06schemes\x09authoritys\x0epath-and-querys\x04\0\x03uri\x03\0\
-\x02\x01p}\x01r\x02\x04names\x05value\x04\x04\0\x06header\x03\0\x05\x01p\x06\x01\
-r\x05\x06method\x01\x03uri\x03\x07versions\x07headers\x07\x04body\x04\x04\0\x07r\
-equest\x03\0\x08\x01r\x04\x06status{\x07versions\x07headers\x07\x04body\x04\x04\0\
-\x08response\x03\0\x0a\x04\0\x12laplace:http/types\x05\x01\x02\x03\0\x01\x07requ\
-est\x02\x03\0\x01\x08response\x01B\x06\x02\x03\x02\x01\x02\x04\0\x07request\x03\0\
-\0\x02\x03\x02\x01\x03\x04\0\x08response\x03\0\x02\x01@\x01\x07request\x01\0\x03\
-\x04\0\x06handle\x01\x04\x04\0\x1elaplace:http/by-client-handler\x05\x04\x04\0\x16\
-laplace:http/http-init\x04\0\x0b\x0f\x01\0\x09http-init\x03\0\0\0G\x09producers\x01\
-\x0cprocessed-by\x02\x0dwit-component\x070.227.1\x10wit-bindgen-rust\x060.41.0";
+nit\x01\x02\x04\0\x1claplace:lapp/lifecycle@0.1.0\x05\0\x01B\x0c\x01m\x09\x07opt\
+ions\x03get\x04post\x03put\x06delete\x04head\x05trace\x07connect\x05patch\x04\0\x06\
+method\x03\0\0\x01r\x03\x06schemes\x09authoritys\x0epath-and-querys\x04\0\x03uri\
+\x03\0\x02\x01p}\x01r\x02\x04names\x05value\x04\x04\0\x06header\x03\0\x05\x01p\x06\
+\x01r\x05\x06method\x01\x03uri\x03\x07versions\x07headers\x07\x04body\x04\x04\0\x07\
+request\x03\0\x08\x01r\x04\x06status{\x07versions\x07headers\x07\x04body\x04\x04\
+\0\x08response\x03\0\x0a\x04\0\x18laplace:lapp/types@0.1.0\x05\x01\x02\x03\0\x01\
+\x07request\x02\x03\0\x01\x08response\x01B\x06\x02\x03\x02\x01\x02\x04\0\x07requ\
+est\x03\0\0\x02\x03\x02\x01\x03\x04\0\x08response\x03\0\x02\x01@\x01\x07request\x01\
+\0\x03\x04\0\x06handle\x01\x04\x04\0\x1alaplace:lapp/handler@0.1.0\x05\x04\x04\0\
+\x1claplace:lapp/back-init@0.1.0\x04\0\x0b\x0f\x01\0\x09back-init\x03\0\0\0G\x09\
+producers\x01\x0cprocessed-by\x02\x0dwit-component\x070.227.1\x10wit-bindgen-rus\
+t\x060.41.0";
 #[inline(never)]
 #[doc(hidden)]
 pub fn __link_custom_section_describing_imports() {

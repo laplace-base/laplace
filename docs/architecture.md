@@ -33,7 +33,7 @@ Laplace — платформа local-first веб-приложений. Поль
 │                                       State { lapps: LappsManager — реестр лаппов }   │
 │                                                    │                                  │
 │   FsStoredAssets ◄── lapp-<name>://… (ассеты окна) ▼ wasmtime (component model)       │
-│   читает platform.frontend_assets_root      echo-back.wasm: export by-client-handler  │
+│   читает platform.frontend_assets_root      echo-back.wasm: export handler            │
 │                                                                                       │
 └───────────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -48,7 +48,7 @@ Laplace — платформа local-first веб-приложений. Поль
 | `laplace-front-api` | Обёртка над `window.__TAURI__.core.invoke` для wasm-фронтов (`handle_http`, `invoke`) |
 | `laplace-front` | Лаунчер — UI самой платформы, лапп с именем `laplace` без back-части |
 | `examples/echo/{back,front}` | Эталонный лапп |
-| `wit/http.wit` | WIT-мир `laplace:http`, который экспортирует каждый back |
+| `wit/` | WIT-пакет `laplace:lapp@0.1.0`: `types`, `handler`, `lifecycle`, миры `back`/`back-init` (`worlds.wit`) |
 | `webassets/vendor` | htmx, расширение `client-router`, стили wingy; раздаётся как псевдо-лапп `vendor` |
 
 ### Лапп = front + back
@@ -57,7 +57,7 @@ Laplace — платформа local-first веб-приложений. Поль
   компоненты `wingy-hypertext`. Интерактивность — htmx; расширение `client-router` перехватывает
   `htmx:configRequest` и отдаёт запрос wasm-функции `router`/`route`, а не в сеть.
 - **back** — WASI-компонент (`wasm32-wasip1`, `cargo component`, `wit-bindgen-rt`), исполняемый
-  `wasmtime` внутри процесса хоста. Экспортирует `by-client-handler.handle(request) -> response`.
+  `wasmtime` внутри процесса хоста. Экспортирует `laplace:lapp/handler@0.1.0.handle(request) -> response` (мир `back`).
 - Ни сокета, ни HTTP-сервера нет: фронт строит `laplace_common_api::http::Request`, вызывает команду
   `handle_http`, хост конвертирует запрос в WIT-типы и вызывает back лаппа, имя которого — метка окна.
 
@@ -221,8 +221,16 @@ stderr — `warn`, одна запись на строку, так что выв
 следующего `\n` хост не видит. Строка длиннее 4 КиБ обрезается с пометкой `[truncated]`; частота
 записей не ограничена. Сообщение паники back-а попадает в лог перед ошибкой вызова.
 
-Back может экспортировать необязательный `laplace:http/lifecycle.init(previous-version)` — для этого
-он собирается на мире `http-init` (`wit/http.wit`), остальные остаются на `http`. Хост находит экспорт
+Контракт back-а — WIT-пакет `laplace:lapp@0.1.0` (`wit/`). Версия входит в имена экспортов
+(`laplace:lapp/handler@0.1.0`), а сопоставления экспортов по semver в wasmtime нет: до 1.0 любая смена
+версии пакета ломает собранные back-и. Хост при компиляции проверяет экспорт `handler` нужной версии
+и отказывает back-у другого контракта понятной ошибкой `LappError::Start`. Импорты возможностей
+(этапы 3–5) объявляются в мире `back` все; собранный компонент сохраняет только те, что вызывает его
+код (проверено: импорт мира, который echo не вызывает, в `echo-back.wasm` не попадает), а хост
+линкует все.
+
+Back может экспортировать необязательный `laplace:lapp/lifecycle@0.1.0.init(previous-version)` —
+для этого он собирается на мире `back-init`, остальные остаются на `back`. Хост находит экспорт
 при компиляции и вызывает `init` на каждом новом инстансе до первого запроса, под тем же дедлайном и
 лимитом памяти, поэтому `init` должен быть идемпотентным. `previous-version` — `application.version`
 из решений пользователя, если она не пустая и не равна версии манифеста; после успешного запуска (с

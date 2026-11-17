@@ -553,3 +553,27 @@ fn backend_panic_message_goes_to_the_log() {
     let records = logged_by("lapp::stress", "stress is told to panic");
     assert!(matches!(records.as_slice(), [(log::Level::Warn, _), ..]), "{records:?}");
 }
+
+#[test]
+fn backend_of_another_contract_is_not_started() {
+    let fixture = Fixture::new("contract");
+    fixture.lapp("old", MANIFEST, false, None);
+
+    // A component with the old handler export only; the host reads the text format too.
+    let old = r#"(component
+        (core module $m (func (export "handle")))
+        (core instance $i (instantiate $m))
+        (func $handle (canon lift (core func $i "handle")))
+        (instance $handler (export "handle" (func $handle)))
+        (export "laplace:http/by-client-handler" (instance $handler))
+    )"#;
+    fs::write(fixture.settings().back_root.join("old/old-back.wasm"), old).unwrap();
+    let state = fixture.state();
+
+    let result = get(&state, "old");
+    assert!(
+        matches!(&result, Err(HttpError::Lapp(LappError::Start { name, error }))
+            if name == "old" && error.to_string().contains("'laplace:lapp/handler@0.1.0'")),
+        "{result:?}"
+    );
+}

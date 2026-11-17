@@ -1,0 +1,8 @@
+package laplace:lapp@0.1.0;
+
+/// Optional: a backend that exports it runs `init` on every new instance, before its first request.
+interface lifecycle {
+    /// `previous-version` is the version the lapp last ran with, if it was another one: the data may
+    /// need to be brought to the current format. `init` should be idempotent.
+    init: func(previous-version: option<string>) -> result<_, string>;
+}

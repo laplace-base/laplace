@@ -8,14 +8,15 @@ Laplace — a local-first web-application platform. A Tauri 2 desktop shell (`la
 hosts sandboxed applications called **lapps**. Each lapp has two halves:
 
 - **back** — a WASI component (`wasm32-wasip1`, built with `cargo component`) run by
-  `wasmtime` inside the host process. It exports the `laplace:http` WIT world `http` (`wit/http.wit`), or `http-init`,
-  which adds the optional `lifecycle.init` the host runs on every new instance.
+  `wasmtime` inside the host process. It is built for the world `back` of the WIT package `laplace:lapp@0.1.0`
+  (`wit/`), or `back-init`, which adds the optional `lifecycle.init` the host runs on every new
+  instance. The version is in the export names: a back built for another one is refused.
 - **front** — a `wasm32-unknown-unknown` `wasm-bindgen` module rendering HTML with
   `hypertext` + `wingy-hypertext`, driven client-side by htmx.
 
 The frontend never talks HTTP over a socket. It builds a `laplace_common_api::http::Request`,
 calls the Tauri command `handle_http`, and the host converts it to WIT types and invokes the
-lapp's `by-client-handler.handle`. The Tauri window *label* is the lapp name — that is how
+lapp's `handler.handle`. The Tauri window *label* is the lapp name — that is how
 `handle_http` (`crates/app/src/api/http.rs`) picks which lapp receives the request.
 
 ## Workspace layout
@@ -28,7 +29,7 @@ lapp's `by-client-handler.handle`. The Tauri window *label* is the lapp name —
 | `crates/common-api` | `laplace-common-api` | Serde-able `http::{Request,Response,Header}` shared by host and front |
 | `crates/front-api` | `laplace-front-api` | wasm-side bindings to `window.__TAURI__.core.invoke` |
 | `examples/echo/{back,front}` | `echo-back`, `echo-front` | Reference lapp |
-| `wit/http.wit` | — | The WIT world every lapp back implements |
+| `wit/` | — | The WIT package `laplace:lapp` every lapp back is built for; `cargo component build` regenerates the committed `bindings.rs` of a back, so build the backs before `cargo make lint` after a WIT change |
 | `webassets/vendor` | — | Vendored htmx + wingy CSS, deployed as the `vendor` "app" |
 | `crates/app/gen/android` | — | Generated-but-committed Android Studio project (`cargo tauri android init`); `app/src/main/assets/data/` is what the app unpacks at startup |
 | `lapps/` | — | Gitignored. **Build output**: `lapps/back/<name>/{manifest.toml,<name>-back.wasm}`, `lapps/front/<name>/`. **Runtime, user-owned, never touched by `cargo make`**: `lapps/config/<name>.toml`, `lapps/data/<name>/` (see Configuration) |
