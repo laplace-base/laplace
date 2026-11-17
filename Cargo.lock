@@ -2543,6 +2543,7 @@ version = "0.1.0"
 dependencies = [
  "android_logger",
  "anyhow",
+ "bytes",
  "clap",
  "flexi_logger",
  "jni",
@@ -2555,6 +2556,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "thiserror 2.0.21",
+ "tokio",
  "wasmtime",
  "wasmtime-wasi",
 ]

@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use std::{env, fs, process, thread};
 
@@ -484,4 +484,72 @@ fn failed_init_keeps_the_lapp_stopped_and_the_version() {
     );
     assert!(!state.lapps.is_running("stress"));
     assert_eq!(user_version(&fixture, &state, "stress"), "fail");
+}
+
+/// The log records of the test process, caught instead of being written.
+fn logged() -> &'static Mutex<Vec<(String, log::Level, String)>> {
+    struct Catcher;
+
+    impl log::Log for Catcher {
+        fn enabled(&self, metadata: &log::Metadata) -> bool {
+            metadata.target().starts_with("lapp::")
+        }
+
+        fn log(&self, record: &log::Record) {
+            if self.enabled(record.metadata()) {
+                logged()
+                    .lock()
+                    .unwrap()
+                    .push((record.target().to_owned(), record.level(), record.args().to_string()));
+            }
+        }
+
+        fn flush(&self) {}
+    }
+
+    static LOGGED: OnceLock<Mutex<Vec<(String, log::Level, String)>>> = OnceLock::new();
+    LOGGED.get_or_init(|| {
+        log::set_boxed_logger(Box::new(Catcher)).unwrap();
+        log::set_max_level(log::LevelFilter::Trace);
+        Mutex::new(Vec::new())
+    })
+}
+
+fn logged_by(target: &str, text: &str) -> Vec<(log::Level, String)> {
+    logged()
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(record_target, _, message)| record_target == target && message.contains(text))
+        .map(|(_, level, message)| (*level, message.clone()))
+        .collect()
+}
+
+#[test]
+fn backend_output_goes_to_the_log_line_by_line() {
+    logged();
+    let fixture = Fixture::new("output");
+    fixture.lapp_with_back("stress", MANIFEST, Some("stress"), None);
+    let state = fixture.state();
+
+    assert_eq!(request(&state, "stress", "print").unwrap(), "ok");
+
+    assert_eq!(logged_by("lapp::stress", "stress std"), [
+        (log::Level::Info, "stress stdout line".to_owned()),
+        (log::Level::Warn, "stress stderr line".to_owned()),
+        (log::Level::Warn, "stress stderr tail".to_owned()),
+    ]);
+}
+
+#[test]
+fn backend_panic_message_goes_to_the_log() {
+    logged();
+    let fixture = Fixture::new("panic");
+    fixture.lapp_with_back("stress", MANIFEST, Some("stress"), None);
+    let state = fixture.state();
+
+    assert!(request(&state, "stress", "panic").is_err());
+
+    let records = logged_by("lapp::stress", "stress is told to panic");
+    assert!(matches!(records.as_slice(), [(log::Level::Warn, _), ..]), "{records:?}");
 }

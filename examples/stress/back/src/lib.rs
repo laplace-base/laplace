@@ -1,3 +1,10 @@
+//! A test backend:
+//! - loops forever on /loop
+//! - runs out of memory on /alloc
+//! - tells the last init version on /previous
+//! - prints on /print
+//! - panics on /panic
+
 use std::sync::Mutex;
 
 use crate::bindings::exports::laplace::http::by_client_handler::{Guest, Request, Response};
@@ -32,6 +39,16 @@ impl Guest for HttpHandler {
         if path.ends_with("/alloc") {
             let memory = vec![1u8; 1 << 30];
             std::hint::black_box(&memory);
+        }
+        if path.ends_with("/print") {
+            println!("stress stdout line");
+            eprint!("stress stderr ");
+            eprintln!("line");
+            // Unbuffered, unlike stdout: the host gets the tail without a line break.
+            eprint!("stress stderr tail");
+        }
+        if path.ends_with("/panic") {
+            panic!("stress is told to panic");
         }
         let body = if path.ends_with("/previous") {
             PREVIOUS_VERSION

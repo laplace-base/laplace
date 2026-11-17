@@ -196,7 +196,9 @@ need its own way to unpack the bundle.
 - `Laplace.toml` in the repo root (platform config, **gitignored** — it is a local file, not a template):
   `platform.lang`, `platform.frontend_assets_root` (defaults to `lapps/front`),
   `log.spec`, `lapps.back_root`, `lapps.config_root`, `lapps.data_root`, `lapps.allowed`,
-  `lapps.call_timeout_ms` (call deadline, 10 s) and `lapps.memory_limit_mb` (256 MB per instance). Path is
+  `lapps.call_timeout_ms` (call deadline, 10 s) and `lapps.memory_limit_mb` (256 MB per instance).
+  The stdout / stderr of a lapp backend are logged under the target `lapp::<name>` (`info` / `warn`),
+  so `log.spec = "info, lapp::echo=debug"` tunes one lapp. Path is
   overridable with `-c/--config`. Env overrides use the `LAPLACE__` prefix, e.g. `LAPLACE__PLATFORM__LANG=ru`.
 - A lapp lives in four roots (`docs/architecture.md`, «Раскладка на диске»): the author's
   `lapps.back_root/<name>/` (`manifest.toml` + optional `<name>-back.wasm`) and

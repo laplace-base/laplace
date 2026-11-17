@@ -5,7 +5,7 @@ authors.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "A backend the host tests drive into an endless loop or out of memory"
+description = "A backend the host tests"
 
     [package.metadata.component.target]
     path = "../../../wit"

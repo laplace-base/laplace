@@ -19,6 +19,7 @@ tauri-build = { workspace = true }
 
 [dependencies]
 anyhow = { workspace = true }
+bytes = { workspace = true }
 clap = { workspace = true }
 flexi_logger = { workspace = true }
 laplace-common-api = { workspace = true }
@@ -29,6 +30,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tauri = { workspace = true }
 thiserror = { workspace = true }
+tokio = { workspace = true }
 wasmtime = { workspace = true }
 wasmtime-wasi = { workspace = true }
 

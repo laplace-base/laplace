@@ -550,7 +550,7 @@ impl LappState {
 
     /// A new instance of the compiled backend `pre`; the lapp settings are not its concern.
     fn new(engine: &Engine, name: String, pre: &HttpPre<WasiStates>, limits: &InstanceLimits) -> anyhow::Result<Self> {
-        let mut states = WasiStates::new();
+        let mut states = WasiStates::new(&name);
         states.limits = StoreLimitsBuilder::new().memory_size(limits.memory_limit_bytes).build();
 
         let mut store = Store::new(engine, states);
@@ -583,15 +583,19 @@ impl LappState {
             .instance
             .get_typed_func::<(Option<&str>,), (Result<(), String>,)>(&mut self.store, init)
             .context("Failed to get the init function")?;
-        let (result,) = init.call(&mut self.store, (previous_version,))?;
-        Ok(result)
+        let result = init.call(&mut self.store, (previous_version,));
+        self.store.data().flush_output();
+        Ok(result?.0)
     }
 
     fn http_handle(&mut self, request: &Request, limits: &InstanceLimits) -> wasmtime::Result<Response> {
         self.store.set_epoch_deadline(limits.deadline_ticks());
-        self.http_instance
+        let response = self
+            .http_instance
             .laplace_http_by_client_handler()
             .call_handle(&mut self.store, request)
-            .context("Failed to call http::handle function")
+            .context("Failed to call http::handle function");
+        self.store.data().flush_output();
+        response
     }
 }
