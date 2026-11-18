@@ -4,3 +4,4 @@ description = "A test backend"
 
 [required.permissions]
 front = ["invoke_back"]
+back = ["file_read", "file_write"]

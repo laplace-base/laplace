@@ -16,7 +16,7 @@ use wasmtime::error::Context;
 use wasmtime::{Config, Engine, Store, StoreLimitsBuilder, Trap};
 
 use crate::api::http::{Back, BackPre, Request, Response};
-use crate::wasi::WasiStates;
+use crate::wasi::{InstanceContext, WasiStates};
 
 /// The causes go into the messages, as that is all the frontend gets of an error.
 #[derive(Debug, Error)]
@@ -80,6 +80,8 @@ pub type LappResult<T> = Result<T, LappError>;
 /// from the instances of their backends, which are started on demand.
 pub struct LappsManager {
     engine: Engine,
+    /// The root of the default data directories of the lapps.
+    data_root: PathBuf,
     limits: InstanceLimits,
     linker: Linker<WasiStates>,
     lapps: HashMap<String, Lapp>,
@@ -98,6 +100,7 @@ impl LappsManager {
 
         Self {
             engine,
+            data_root: settings.data_root.clone(),
             limits: InstanceLimits {
                 call_timeout_ms: settings.call_timeout_ms,
                 memory_limit_bytes: usize::try_from(settings.memory_limit_mb.saturating_mul(1 << 20))
@@ -297,8 +300,9 @@ impl LappsManager {
                     name: name.into(),
                     error,
                 })?;
+            let context = lapp.instance_context(name, &self.data_root);
             let mut state =
-                LappState::new(&self.engine, name.into(), &compiled.pre, &self.limits).map_err(|error| {
+                LappState::new(&self.engine, name.into(), &compiled.pre, &context, &self.limits).map_err(|error| {
                     LappError::Start {
                         name: name.into(),
                         error,
@@ -455,6 +459,15 @@ impl Lapp {
         crate::csp::policy(name, &permissions, &hosts.front)
     }
 
+    /// What a new instance of the backend is given, by the current user settings.
+    fn instance_context(&self, name: &str, data_root: &Path) -> InstanceContext {
+        let user_settings = self.user_settings_read();
+        InstanceContext {
+            permissions: user_settings.effective_permissions(&self.manifest_settings).back,
+            data_dir: user_settings.data_dir(data_root, name),
+        }
+    }
+
     /// The version the lapp last ran with, if it is known and not the one of the manifest.
     fn previous_version(&self) -> Option<String> {
         let version = &self.user_settings_read().application.app.version;
@@ -556,8 +569,14 @@ impl LappState {
     }
 
     /// A new instance of the compiled backend `pre`; the lapp settings are not its concern.
-    fn new(engine: &Engine, name: String, pre: &BackPre<WasiStates>, limits: &InstanceLimits) -> anyhow::Result<Self> {
-        let mut states = WasiStates::new(&name);
+    fn new(
+        engine: &Engine,
+        name: String,
+        pre: &BackPre<WasiStates>,
+        context: &InstanceContext,
+        limits: &InstanceLimits,
+    ) -> anyhow::Result<Self> {
+        let mut states = WasiStates::new(&name, context)?;
         states.limits = StoreLimitsBuilder::new().memory_size(limits.memory_limit_bytes).build();
 
         let mut store = Store::new(engine, states);

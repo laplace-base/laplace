@@ -577,3 +577,126 @@ fn backend_of_another_contract_is_not_started() {
         "{result:?}"
     );
 }
+
+const FILES_MANIFEST: &str = r#"
+[application]
+title = "Test"
+
+[required.permissions]
+front = ["invoke_back"]
+back = ["file_read", "file_write"]
+"#;
+
+fn files_user_config(back_permissions: &[&str], data_dir: Option<&str>) -> String {
+    let data_dir_prop = data_dir.map(|dir| format!("data_dir = {dir:?}\n")).unwrap_or_default();
+    format!(
+        "[application]\n{data_dir_prop}\n[allowed.permissions]\nfront = [\"invoke_back\"]\nback = {back_permissions:?}\n"
+    )
+}
+
+fn files_fixture(test: &str, back_permissions: &[&str], data_dir: Option<&str>) -> (Fixture, State) {
+    let fixture = Fixture::new(test);
+    fixture.lapp_with_back(
+        "stress",
+        FILES_MANIFEST,
+        Some("stress"),
+        Some(&files_user_config(back_permissions, data_dir)),
+    );
+    let state = fixture.state();
+    (fixture, state)
+}
+
+#[test]
+fn backend_without_file_permissions_has_no_files() {
+    let (fixture, state) = files_fixture("files-none", &[], None);
+
+    assert!(
+        request(&state, "stress", "write/note.txt")
+            .unwrap()
+            .starts_with("error")
+    );
+    assert!(request(&state, "stress", "read/note.txt").unwrap().starts_with("error"));
+    assert!(!fixture.settings().data_root.join("stress").exists());
+}
+
+#[test]
+fn file_read_reads_but_does_not_write() {
+    let (fixture, state) = files_fixture("files-read", &["file_read"], None);
+    let data_dir = fixture.settings().data_root.join("stress");
+
+    fs::create_dir_all(&data_dir).unwrap();
+    fs::write(data_dir.join("note.txt"), "prepared").unwrap();
+
+    assert_eq!(request(&state, "stress", "read/note.txt").unwrap(), "prepared");
+    assert!(request(&state, "stress", "write/new.txt").unwrap().starts_with("error"));
+    assert!(
+        request(&state, "stress", "write/note.txt")
+            .unwrap()
+            .starts_with("error")
+    );
+    assert!(!data_dir.join("new.txt").exists());
+    assert_eq!(fs::read_to_string(data_dir.join("note.txt")).unwrap(), "prepared");
+}
+
+#[test]
+fn file_write_writes_into_the_data_directory() {
+    let (fixture, state) = files_fixture("files-write", &["file_write"], None);
+
+    assert_eq!(request(&state, "stress", "write/note.txt").unwrap(), "ok");
+    assert_eq!(request(&state, "stress", "read/note.txt").unwrap(), "written by stress");
+    assert_eq!(
+        fs::read_to_string(fixture.settings().data_root.join("stress/note.txt")).unwrap(),
+        "written by stress"
+    );
+}
+
+#[test]
+fn user_data_dir_moves_the_files() {
+    let own = env::temp_dir().join(format!("laplace-lapps-{}-own-data", process::id()));
+    fs::remove_dir_all(&own).ok();
+
+    let (fixture, state) = files_fixture("files-own", &["file_write"], Some(own.to_str().unwrap()));
+
+    assert_eq!(request(&state, "stress", "write/note.txt").unwrap(), "ok");
+    assert_eq!(fs::read_to_string(own.join("note.txt")).unwrap(), "written by stress");
+    assert!(!fixture.settings().data_root.join("stress").exists());
+
+    fs::remove_dir_all(&own).ok();
+}
+
+#[test]
+fn backend_does_not_leave_its_data_directory() {
+    let (fixture, state) = files_fixture("files-outside", &["file_read", "file_write"], None);
+    let data_root = fixture.settings().data_root;
+
+    fs::create_dir_all(&data_root).unwrap();
+    fs::write(data_root.join("outside.txt"), "outside").unwrap();
+
+    assert!(
+        request(&state, "stress", "read/../outside.txt")
+            .unwrap()
+            .starts_with("error")
+    );
+    assert!(
+        request(&state, "stress", "write/../escaped.txt")
+            .unwrap()
+            .starts_with("error")
+    );
+    assert!(!data_root.join("escaped.txt").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn symlink_out_of_the_data_directory_is_not_followed() {
+    use std::os;
+
+    let (fixture, state) = files_fixture("files-symlink", &["file_read"], None);
+    let data_root = fixture.settings().data_root;
+
+    fs::create_dir_all(data_root.join("stress")).unwrap();
+    fs::write(data_root.join("outside.txt"), "outside").unwrap();
+    os::unix::fs::symlink(data_root.join("outside.txt"), data_root.join("stress/link.txt")).unwrap();
+
+    let read = request(&state, "stress", "read/link.txt").unwrap();
+    assert!(read.starts_with("error"), "{read}");
+}

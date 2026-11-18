@@ -4,7 +4,9 @@
 //! - tells the last init version on /previous
 //! - prints on /print
 //! - panics on /panic
+//! - writes `/<file>` of its data directory on /write/<file>, reads it on /read/<file>
 
+use std::fs;
 use std::hint::black_box;
 use std::sync::Mutex;
 
@@ -51,6 +53,16 @@ impl Lapp for Stress {
                 "ok".into()
             },
             Some("/panic") => panic!("stress is told to panic"),
+            Some(path) if path.starts_with("/write/") => {
+                let file = &path["/write".len()..];
+                match fs::write(file, "written by stress") {
+                    Ok(()) => "ok".into(),
+                    Err(err) => format!("error: {err}"),
+                }
+            },
+            Some(path) if path.starts_with("/read/") => {
+                fs::read_to_string(&path["/read".len()..]).unwrap_or_else(|err| format!("error: {err}"))
+            },
             _ => "ok".into(),
         };
 
