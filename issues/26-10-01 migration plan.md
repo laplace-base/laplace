@@ -189,13 +189,13 @@ back с бесконечным циклом получает ошибку по �
 миры `back`/`back-init`). Импорты этапов 3–5 объявляются в мире `back`; хост линкует их всегда — без
 права заглушками (этап 3), — а back импортирует только то, что вызывает, и всё равно инстанцируется.
 
-2.6. **SDK для back-ов** — замена `laplace_wasm`/`laplace_wasm_macro`: крейт `laplace-back-api` с
-привязками `wit-bindgen` (`generate!` с `pub_export_macro`), конверсией в/из типов `http`, роутингом
-по пути и обёртками над импортами (`database::query`, …). Сейчас echo собирается `cargo component` с
-собственным сгенерированным `bindings.rs`; echo переводится на SDK, `cargo-component` остаётся для
-сборки или заменяется на `wasm32-wasip2`.
+2.6. **SDK для back-ов** — сделано: `laplace-back-api` (`crates/back-api`) с привязками `wit-bindgen`,
+трейтом `Lapp` и `export!`, конверсией в/из типов `http` и `Router`; back-и собираются обычным
+`cargo build --target wasm32-wasip2`, `cargo-component` и закоммиченные `bindings.rs` не нужны.
 
 ## Этап 3. Возможности хоста по разрешениям
+
+Обёртки над импортами (`database::query`, …) — в `laplace-back-api`, на типах SDK, а не WIT.
 
 Возможности даются по действующим правам back-а (`effective_permissions`). Без права импорт не
 остаётся незалинкованным: на его место линкуется заглушка, которая возвращает `Err("permission

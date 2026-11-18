@@ -7,7 +7,7 @@ Guidance for AI agents when working in this repository.
 Laplace — a local-first web-application platform. A Tauri 2 desktop shell (`laplace-app`)
 hosts sandboxed applications called **lapps**. Each lapp has two halves:
 
-- **back** — a WASI component (`wasm32-wasip1`, built with `cargo component`) run by
+- **back** — a WASI component (a `cdylib` built for `wasm32-wasip2` by plain `cargo build`) run by
   `wasmtime` inside the host process. It is built for the world `back` of the WIT package `laplace:lapp@0.1.0`
   (`wit/`), or `back-init`, which adds the optional `lifecycle.init` the host runs on every new
   instance. The version is in the export names: a back built for another one is refused.
@@ -28,8 +28,10 @@ lapp's `handler.handle`. The Tauri window *label* is the lapp name — that is h
 | `crates/settings` | `laplace-settings` | `Laplace.toml` (platform), lapp `manifest.toml` and user decision schemas, shared by host and front; file IO behind the `io` feature |
 | `crates/common-api` | `laplace-common-api` | Serde-able `http::{Request,Response,Header}` shared by host and front |
 | `crates/front-api` | `laplace-front-api` | wasm-side bindings to `window.__TAURI__.core.invoke` |
+| `crates/back-api` | `laplace-back-api` | SDK of lapp backs: `wit_bindgen::generate!` bindings, trait `Lapp` + `export!`, WIT ↔ `http` conversion, `Router` |
 | `examples/echo/{back,front}` | `echo-back`, `echo-front` | Reference lapp |
-| `wit/` | — | The WIT package `laplace:lapp` every lapp back is built for; `cargo component build` regenerates the committed `bindings.rs` of a back, so build the backs before `cargo make lint` after a WIT change |
+| `examples/stress/back` | `stress-back` | Test-only back the host tests drive (loop, out of memory, `init`, output, panic) |
+| `wit/` | — | The WIT package `laplace:lapp` every lapp back is built for; the bindings are generated at compile time (`laplace-back-api`), nothing is committed |
 | `webassets/vendor` | — | Vendored htmx + wingy CSS, deployed as the `vendor` "app" |
 | `crates/app/gen/android` | — | Generated-but-committed Android Studio project (`cargo tauri android init`); `app/src/main/assets/data/` is what the app unpacks at startup |
 | `lapps/` | — | Gitignored. **Build output**: `lapps/back/<name>/{manifest.toml,<name>-back.wasm}`, `lapps/front/<name>/`. **Runtime, user-owned, never touched by `cargo make`**: `lapps/config/<name>.toml`, `lapps/data/<name>/` (see Configuration) |
@@ -42,7 +44,7 @@ loads settings and logging, then calls `laplace_app_lib::run_desktop`.
 ## Building and running
 
 Everything goes through **`cargo-make`**, not bare `cargo`. Required tooling:
-`cargo-make`, `cargo-component`, `cargo-tauri`, `wasm-bindgen-cli`, `wasm-opt` (binaryen),
+`cargo-make`, `cargo-tauri`, `wasm-bindgen-cli`, `wasm-opt` (binaryen),
 `watchexec` (for `watch`), and a **nightly** toolchain for `cargo fmt` (`.rustfmt.toml` uses
 unstable options).
 
@@ -69,7 +71,8 @@ without that cfg will fail to link.
 
 The pipeline per app (`APP_NAME`) is: `build-front` → `wasm-bindgen` into `target/dist` →
 `wasm-opt` → copy `webassets/**` and `target/dist/*` into `lapps/front/<APP_NAME>/`.
-Backs go `cargo component build` → copy to `lapps/back/<APP_NAME>/<APP_NAME>-back.wasm`.
+Backs go `cargo build --target wasm32-wasip2` (the `wasm32-wasip2` target must be installed) →
+copy to `lapps/back/<APP_NAME>/<APP_NAME>-back.wasm`.
 Both `front` and `back` also run `deploy-manifest`, which copies the lapp manifest
 `examples/<APP_NAME>/manifest.toml` to `lapps/back/<APP_NAME>/manifest.toml` — every lapp
 has that directory, with a backend or not.

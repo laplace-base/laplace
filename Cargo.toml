@@ -40,6 +40,7 @@ icondata = "0.7"
 iconic = { git = "https://github.com/XX/iconic", features = ["hypertext", "fontawesome", "fontawesome-ext"] }
 jni = "0.21" # NOTE: `tao` links jni 0.21, so the same version keeps a single copy of it in the binary.
 js-sys = "0.3"
+laplace-back-api = { path = "crates/back-api" }
 laplace-common-api = { path = "crates/common-api" }
 laplace-front-api = { path = "crates/front-api" }
 laplace-settings = { path = "crates/settings" }
@@ -50,18 +51,18 @@ serde-wasm-bindgen = "0.6"
 serde_json = "1.0"
 serde_with = "3.24"
 strum = { version = "0.28", features = ["derive"] }
-tauri = { version = "2.11", features = ["config-toml", "devtools"] }
+tauri = { version = "2.12", features = ["config-toml", "devtools"] }
 tauri-build = { version = "2.7", default-features = false, features = ["config-toml"] }
 thiserror = "2.0"
 tokio = { version = "1.54", default-features = false }
-toml = "1.1"
+toml = "1.2"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 wasm-dom = "2.2"
 wasm-web-helpers = "0.2"
-wasmtime = "49.0"
-wasmtime-wasi = "49.0"
+wasmtime = "50.0"
+wasmtime-wasi = "50.0"
 web-sys = { version = "0.3" }
 wingy-hypertext = { git = "https://github.com/XX/wingy-hypertext", branch = "dev" }
 wingy-hypertext-web = { git = "https://github.com/XX/wingy-hypertext", branch = "dev" }
-wit-bindgen-rt = { version = "0.44", features = ["bitflags"] }
+wit-bindgen = { version = "0.63", default-features = false, features = ["macros", "realloc", "std"] }

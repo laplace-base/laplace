@@ -1,0 +1,12 @@
+[package]
+name = "laplace-back-api"
+version = "0.1.0"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The SDK of the lapp backends of the local-first web-application platform"
+
+[dependencies]
+http = { workspace = true }
+wit-bindgen = { workspace = true }

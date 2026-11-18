@@ -141,13 +141,13 @@ end
 [tasks.build-back]
 command = "cargo"
 toolchain = "stable"
-args = ["component", "build", "-p", "${APP_NAME}-back", "--profile", "${PROFILE}"]
+args = ["build", "-p", "${APP_NAME}-back", "--target", "wasm32-wasip2", "--profile", "${PROFILE}"]
 dependencies = ["choose-profile"]
 
 [tasks.deploy-back]
 script_runner = "@duckscript"
 script = '''
-cp target/wasm32-wasip1/${PROFILE_BUILD_DIR}/${APP_NAME}_back.wasm ${BACK_OUTPUT_DIR}/${APP_NAME}/${APP_NAME}-back.wasm
+cp target/wasm32-wasip2/${PROFILE_BUILD_DIR}/${APP_NAME}_back.wasm ${BACK_OUTPUT_DIR}/${APP_NAME}/${APP_NAME}-back.wasm
 '''
 
 [tasks.back]

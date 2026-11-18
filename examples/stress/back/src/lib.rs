@@ -5,21 +5,18 @@
 //! - prints on /print
 //! - panics on /panic
 
+use std::hint::black_box;
 use std::sync::Mutex;
 
-use crate::bindings::exports::laplace::lapp::handler::{Guest, Request, Response};
-use crate::bindings::exports::laplace::lapp::lifecycle::Guest as LifecycleGuest;
+use laplace_back_api::http::{Request, Response};
+use laplace_back_api::{Lapp, api_path};
 
-#[allow(warnings)]
-#[rustfmt::skip]
-mod bindings;
-
-/// The `previous-version` the last `init` was given.
+/// The `previous_version` the last `init` was given.
 static PREVIOUS_VERSION: Mutex<Option<String>> = Mutex::new(None);
 
-struct HttpHandler;
+struct Stress;
 
-impl LifecycleGuest for HttpHandler {
+impl Lapp for Stress {
     fn init(previous_version: Option<String>) -> Result<(), String> {
         if previous_version.as_deref() == Some("fail") {
             return Err("init is told to fail".into());
@@ -27,46 +24,38 @@ impl LifecycleGuest for HttpHandler {
         *PREVIOUS_VERSION.lock().unwrap() = previous_version;
         Ok(())
     }
-}
 
-impl Guest for HttpHandler {
-    fn handle(request: Request) -> Response {
-        let path = request.uri.path_and_query.as_str();
-        if path.ends_with("/loop") {
-            #[allow(clippy::empty_loop)]
-            loop {}
-        }
-        if path.ends_with("/alloc") {
-            let memory = vec![1u8; 1 << 30];
-            std::hint::black_box(&memory);
-        }
-        if path.ends_with("/print") {
-            println!("stress stdout line");
-            eprint!("stress stderr ");
-            eprintln!("line");
-            // Unbuffered, unlike stdout: the host gets the tail without a line break.
-            eprint!("stress stderr tail");
-        }
-        if path.ends_with("/panic") {
-            panic!("stress is told to panic");
-        }
-        let body = if path.ends_with("/previous") {
-            PREVIOUS_VERSION
+    fn handle(request: Request<Vec<u8>>) -> Response<Vec<u8>> {
+        let body = match api_path(request.uri().path()) {
+            Some("/loop") =>
+            {
+                #[allow(clippy::empty_loop)]
+                loop {}
+            },
+            Some("/alloc") => {
+                let memory = vec![1u8; 1 << 30];
+                black_box(&memory);
+                "ok".into()
+            },
+            Some("/previous") => PREVIOUS_VERSION
                 .lock()
                 .unwrap()
                 .clone()
-                .unwrap_or_else(|| "none".into())
-        } else {
-            "ok".into()
+                .unwrap_or_else(|| "none".into()),
+            Some("/print") => {
+                println!("stress stdout line");
+                eprint!("stress stderr ");
+                eprintln!("line");
+                // Unbuffered, unlike stdout: the host gets the tail without a line break.
+                eprint!("stress stderr tail");
+                "ok".into()
+            },
+            Some("/panic") => panic!("stress is told to panic"),
+            _ => "ok".into(),
         };
 
-        Response {
-            status: 200,
-            version: request.version,
-            headers: Vec::new(),
-            body: body.into_bytes(),
-        }
+        Response::new(body.into_bytes())
     }
 }
 
-bindings::export!(HttpHandler with_types_in bindings);
+laplace_back_api::export!(Stress);

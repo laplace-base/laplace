@@ -56,8 +56,13 @@ Laplace — платформа local-first веб-приложений. Поль
 - **front** — модуль `wasm32-unknown-unknown` (`wasm-bindgen`), рисующий HTML через `hypertext` `rsx!` и
   компоненты `wingy-hypertext`. Интерактивность — htmx; расширение `client-router` перехватывает
   `htmx:configRequest` и отдаёт запрос wasm-функции `router`/`route`, а не в сеть.
-- **back** — WASI-компонент (`wasm32-wasip1`, `cargo component`, `wit-bindgen-rt`), исполняемый
-  `wasmtime` внутри процесса хоста. Экспортирует `laplace:lapp/handler@0.1.0.handle(request) -> response` (мир `back`).
+- **back** — WASI-компонент (`cdylib` под `wasm32-wasip2`, обычный `cargo build`), исполняемый
+  `wasmtime` внутри процесса хоста. Экспортирует `laplace:lapp/handler@0.1.0.handle(request) -> response`.
+  Пишется на SDK `laplace-back-api` (`crates/back-api`): привязки `wit_bindgen::generate!` к миру
+  `back-init` внутри SDK, трейт `Lapp` (`handle` на типах `http`, `init` с пустой реализацией),
+  макрос `export!`, конверсия WIT ↔ `http` по правилам хоста и `Router` по методу и пути относительно
+  `/<name>/api` (`404`/`405`, fallback). Back на SDK всегда экспортирует `lifecycle`; мир `back` —
+  для back-ов без SDK. Обёртки над импортами этапов 3–5 тоже идут в SDK.
 - Ни сокета, ни HTTP-сервера нет: фронт строит `laplace_common_api::http::Request`, вызывает команду
   `handle_http`, хост конвертирует запрос в WIT-типы и вызывает back лаппа, имя которого — метка окна.
 
@@ -254,7 +259,7 @@ Back может экспортировать необязательный `lapla
 | --- | --- | --- |
 | Оболочка | axum-сервер (HTTP/HTTPS, self-signed TLS) + браузер пользователя | Tauri 2, своё окно на лапп, Android-пакет |
 | Доступ | access token в cookie на путь лаппа | процесс локальный, сети нет; разграничение — по метке окна: команды управления принимаются только от окна `laplace` |
-| Back | core-модуль wasm, ручное ABI: `alloc`/`dealloc`, `WasmSlice`, borsh, макрос `#[http::process]` | WASI-компонент, WIT-мир, `wasmtime::component::bindgen!` / `cargo component` |
+| Back | core-модуль wasm, ручное ABI: `alloc`/`dealloc`, `WasmSlice`, borsh, макрос `#[http::process]` | WASI-компонент, WIT-мир, `wasmtime::component::bindgen!` / SDK `laplace-back-api` на `wit-bindgen` |
 | Исполнение | поток на лапп, актор `LappService` (`truba`), async wasmtime, ленивый запуск + `autoload` | реестр + ленивый запуск и `autoload`, блокировка на лапп, вызов в `spawn_blocking` |
 | Возможности back-а | FS (preopen `data_dir`), SQLite, исходящий HTTP (reqwest, фильтр методов/хостов), sleep — по разрешениям | только WASI без preopen |
 | Push к клиенту | WebSocket ↔ `route_ws` | нет |

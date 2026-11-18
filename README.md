@@ -12,8 +12,8 @@ defined in [`Makefile.toml`](Makefile.toml).
 ```sh
 rustup toolchain install nightly            # `cargo fmt` uses unstable options
 rustup target add wasm32-unknown-unknown    # lapp frontends
-rustup target add wasm32-wasip1             # lapp backends
-cargo install cargo-make cargo-component wasm-bindgen-cli
+rustup target add wasm32-wasip2             # lapp backends
+cargo install cargo-make wasm-bindgen-cli
 cargo install tauri-cli --version "^2"      # provides `cargo tauri`
 ```
 

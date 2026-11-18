@@ -32,13 +32,13 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable, nightly
-          target: wasm32-wasip1
+          target: wasm32-wasip2
           components: clippy, rustfmt
 
-      - name: Install cargo-make and cargo-component
+      - name: Install cargo-make
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-make,cargo-component
+          tool: cargo-make
 
       # `tauri::generate_context!` fails to compile when `frontend-dist` does not exist.
       - name: Create the frontend dist directory
