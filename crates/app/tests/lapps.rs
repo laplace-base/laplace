@@ -700,3 +700,107 @@ fn symlink_out_of_the_data_directory_is_not_followed() {
     let read = request(&state, "stress", "read/link.txt").unwrap();
     assert!(read.starts_with("error"), "{read}");
 }
+
+const TODO_MANIFEST: &str = r#"
+[application]
+title = "Todo"
+
+[required.permissions]
+front = ["invoke_back"]
+back = ["database"]
+
+[database]
+path = "todos.db"
+"#;
+
+const TODO_ALLOWED: &str = "[allowed.permissions]\nfront = [\"invoke_back\"]\nback = [\"database\"]\n";
+
+fn todo_call(state: &State, method: &str, path: &str, body: &str) -> (u16, String) {
+    let request = Request::builder()
+        .method(method)
+        .uri(format!("/todo/api/{path}"))
+        .body(body.as_bytes().to_vec())
+        .build()
+        .unwrap();
+    let response = process_http(state, "todo", request).unwrap();
+    (response.status.as_u16(), String::from_utf8(response.body).unwrap())
+}
+
+#[test]
+fn todo_without_the_database_permission_tells_why() {
+    let fixture = Fixture::new("todo-denied");
+    fixture.lapp_with_back("todo", TODO_MANIFEST, Some("todo"), None);
+    let state = fixture.state();
+
+    let (status, body) = todo_call(&state, "GET", "list", "");
+    assert_eq!(status, 500);
+    assert_eq!(body, r#"{"Error":"permission denied: database"}"#);
+    assert!(state.lapps.is_running("todo"));
+    assert!(!fixture.settings().data_root.join("todo").exists());
+}
+
+#[test]
+fn todo_tasks_survive_a_restart() {
+    let fixture = Fixture::new("todo-tasks");
+    fixture.lapp_with_back("todo", TODO_MANIFEST, Some("todo"), Some(TODO_ALLOWED));
+    let state = fixture.state();
+
+    assert_eq!(todo_call(&state, "GET", "list", ""), (200, r#"{"List":[]}"#.into()));
+    assert_eq!(
+        todo_call(
+            &state,
+            "POST",
+            "add",
+            r#"{"description":"Buy 'milk'; DROP TABLE tasks"}"#
+        ),
+        (
+            200,
+            r#"{"List":[{"id":1,"description":"Buy 'milk'; DROP TABLE tasks","completed":false}]}"#.into()
+        )
+    );
+    assert!(fixture.settings().data_root.join("todo/todos.db").exists());
+
+    state.lapps.restart_lapp("todo").unwrap();
+    assert_eq!(
+        todo_call(
+            &state,
+            "POST",
+            "update",
+            r#"{"id":1,"description":"Buy milk","completed":true}"#
+        ),
+        (
+            200,
+            r#"{"List":[{"id":1,"description":"Buy milk","completed":true}]}"#.into()
+        )
+    );
+    assert_eq!(todo_call(&state, "POST", "add", r#"{"description":"Bake"}"#).0, 200);
+    assert_eq!(
+        todo_call(&state, "POST", "clear_completed", ""),
+        (
+            200,
+            r#"{"List":[{"id":2,"description":"Bake","completed":false}]}"#.into()
+        )
+    );
+    assert_eq!(todo_call(&state, "POST", "delete", "2"), (200, r#"{"List":[]}"#.into()));
+    assert_eq!(
+        todo_call(&state, "POST", "update", r#"{"id":7,"description":"x"}"#).0,
+        500
+    );
+}
+
+#[test]
+fn database_path_outside_the_data_directory_is_refused() {
+    let fixture = Fixture::new("todo-path");
+    let manifest = TODO_MANIFEST.replace(r#"path = "todos.db""#, r#"path = "../todos.db""#);
+    fixture.lapp_with_back("todo", &manifest, Some("todo"), Some(TODO_ALLOWED));
+    let state = fixture.state();
+
+    let request = Request::get("/todo/api/list").build().unwrap();
+    let result = process_http(&state, "todo", request);
+    assert!(
+        matches!(&result, Err(HttpError::Lapp(LappError::Start { error, .. }))
+            if error.to_string().contains("'../todos.db'")),
+        "{result:?}"
+    );
+    assert!(!fixture.settings().data_root.join("todos.db").exists());
+}

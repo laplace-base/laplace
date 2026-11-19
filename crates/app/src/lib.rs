@@ -12,6 +12,7 @@ pub mod android;
 pub mod api;
 pub mod assets;
 pub mod csp;
+pub mod database;
 pub mod lapps;
 pub mod logging;
 pub mod wasi;

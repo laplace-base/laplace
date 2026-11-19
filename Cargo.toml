@@ -5,6 +5,9 @@ members = [
     "examples/echo/back",
     "examples/echo/front",
     "examples/stress/back",
+    "examples/todo/back",
+    "examples/todo/front",
+    "examples/todo/common",
 ]
 
 [workspace.package]
@@ -27,7 +30,6 @@ strip = "debuginfo"
 [workspace.dependencies]
 android_logger = { version = "0.15", default-features = false }
 anyhow = "1.0"
-ban = "3.9"
 bytes = "1.12"
 clap = { version = "4.6", features = ["derive"] }
 config = "0.15"
@@ -36,16 +38,16 @@ flexi_logger = "0.31"
 http = "1.5"
 http-serde = "2.1"
 hypertext = { git = "https://github.com/XX/hypertext", branch = "dev", features = ["axum", "htmx"] }
-icondata = "0.7"
 iconic = { git = "https://github.com/XX/iconic", features = ["hypertext", "fontawesome", "fontawesome-ext"] }
 jni = "0.21" # NOTE: `tao` links jni 0.21, so the same version keeps a single copy of it in the binary.
-js-sys = "0.3"
 laplace-back-api = { path = "crates/back-api" }
 laplace-common-api = { path = "crates/common-api" }
 laplace-front-api = { path = "crates/front-api" }
 laplace-settings = { path = "crates/settings" }
+todo-common = { path = "examples/todo/common" }
 log = "0.4"
 percent-encoding = "2.3"
+rusqlite = { version = "0.41", default-features = false, features = ["bundled", "hooks"] }
 serde = { version = "1.0", features = ["derive"] }
 serde-wasm-bindgen = "0.6"
 serde_json = "1.0"

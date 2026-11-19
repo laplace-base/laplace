@@ -1,0 +1,11 @@
+[package]
+name = "todo-common"
+version = "0.1.0"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The types the Todo lapp example front and back share"
+
+[dependencies]
+serde = { workspace = true }

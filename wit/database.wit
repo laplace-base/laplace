@@ -1,0 +1,25 @@
+package laplace:lapp@0.1.0;
+
+/// The SQLite database of the lapp, in its data directory.
+interface database {
+    variant value {
+        null,
+        integer(s64),
+        real(f64),
+        text(string),
+        blob(list<u8>),
+    }
+
+    record row {
+        values: list<value>,
+    }
+
+    /// Runs one statement with the parameters `?1`, `?2`, …; the number of the changed rows.
+    execute: func(sql: string, params: list<value>) -> result<u64, string>;
+
+    /// Runs one query; all of its rows.
+    query: func(sql: string, params: list<value>) -> result<list<row>, string>;
+
+    /// Runs one query; its first row, if any.
+    query-row: func(sql: string, params: list<value>) -> result<option<row>, string>;
+}

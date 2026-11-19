@@ -33,7 +33,7 @@
 | --- | --- | --- | --- |
 | `invoke_back` | ✓ | | фронт может обращаться к своему back-у |
 | `file_read`, `file_write` | | ✓ | чтение / изменение каталога данных лаппа — корня `/` back-а; `file_write` включает чтение: записи без чтения в WASI нет |
-| `database` | | ✓ | своя SQLite-база |
+| `database` | | ✓ | своя SQLite-база в каталоге данных (`[database].path`); без права вызовы `database` отказывают, лапп работает |
 | `http` | ✓ | ✓ | исходящие HTTP-запросы к хостам, которые манифест просит (`required.network.http.front`/`.back`), а пользователь разрешил (`allowed.network.http.front`/`.back`); у фронта — через CSP, без фильтра методов |
 | `websocket` | ✓ | ✓ | у фронта — WebSocket (`wss://`) к тем же хостам, что и `http`; у back-а — канал back ↔ front (push) |
 | `tcp` | | ✓ | сетевые соединения, в т.ч. P2P (`network.gossipsub`) |

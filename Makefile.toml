@@ -185,8 +185,12 @@ dependencies = ["laplace-front"]
 env = { APP_NAME = "echo" }
 run_task = { name = ["front", "back"] }
 
+[tasks.todo]
+env = { APP_NAME = "todo" }
+run_task = { name = ["front", "back"] }
+
 [tasks.examples]
-dependencies = ["echo"]
+dependencies = ["echo", "todo"]
 
 [tasks.lapps]
 description = "Build everything that is deployed: vendored web assets, the Laplace frontend and the examples"
@@ -343,9 +347,13 @@ run_task = "back"
 env = { APP_NAME = "stress" }
 run_task = "back"
 
+[tasks.back-todo]
+env = { APP_NAME = "todo" }
+run_task = "back"
+
 [tasks.test-backs]
 description = "Build and deploy the lapp backends the host tests load"
-dependencies = ["back-echo", "back-stress"]
+dependencies = ["back-echo", "back-stress", "back-todo"]
 
 [tasks.test]
 toolchain = "stable"

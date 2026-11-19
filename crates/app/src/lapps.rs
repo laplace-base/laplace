@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::{fs, thread};
 
 use anyhow::{anyhow, bail};
@@ -11,11 +11,12 @@ use laplace_settings::lapp::file::LappSettingsError;
 use laplace_settings::lapp::update::UpdateQuery;
 use laplace_settings::lapp::{self, LappInfo, LappManifestSettings, LappUserSettings};
 use thiserror::Error;
-use wasmtime::component::{Component, ComponentExportIndex, Instance, Linker};
+use wasmtime::component::{Component, ComponentExportIndex, HasSelf, Instance, Linker};
 use wasmtime::error::Context;
 use wasmtime::{Config, Engine, Store, StoreLimitsBuilder, Trap};
 
-use crate::api::http::{Back, BackPre, Request, Response};
+use crate::api::http::{Back, BackPre, Request, Response, laplace};
+use crate::database;
 use crate::wasi::{InstanceContext, WasiStates};
 
 /// The causes go into the messages, as that is all the frontend gets of an error.
@@ -97,6 +98,9 @@ impl LappsManager {
 
         let mut linker = Linker::new(&engine);
         wasmtime_wasi::p2::add_to_linker_sync(&mut linker).expect("the WASI imports link");
+        // The host capabilities are always linked; every function checks its permission itself.
+        laplace::lapp::database::add_to_linker::<_, HasSelf<WasiStates>>(&mut linker, |states| states)
+            .expect("the database imports link");
 
         Self {
             engine,
@@ -300,7 +304,12 @@ impl LappsManager {
                     name: name.into(),
                     error,
                 })?;
-            let context = lapp.instance_context(name, &self.data_root);
+            let context = lapp
+                .instance_context(name, &self.data_root)
+                .map_err(|error| LappError::Start {
+                    name: name.into(),
+                    error,
+                })?;
             let mut state =
                 LappState::new(&self.engine, name.into(), &compiled.pre, &context, &self.limits).map_err(|error| {
                     LappError::Start {
@@ -348,6 +357,11 @@ struct InstanceLimits {
 }
 
 impl InstanceLimits {
+    /// The deadline of a call that starts now.
+    fn call_deadline(&self) -> Instant {
+        Instant::now() + Duration::from_millis(self.call_timeout_ms)
+    }
+
     /// The deadline of a call in epoch ticks, rounded up.
     fn deadline_ticks(&self) -> u64 {
         self.call_timeout_ms.div_ceil(EPOCH_TICK.as_millis() as u64).max(1)
@@ -460,12 +474,16 @@ impl Lapp {
     }
 
     /// What a new instance of the backend is given, by the current user settings.
-    fn instance_context(&self, name: &str, data_root: &Path) -> InstanceContext {
+    fn instance_context(&self, name: &str, data_root: &Path) -> anyhow::Result<InstanceContext> {
         let user_settings = self.user_settings_read();
-        InstanceContext {
+        let data_dir = user_settings.data_dir(data_root, name);
+        let database_path = database::database_path(&data_dir, self.manifest_settings.database().path())?;
+
+        Ok(InstanceContext {
             permissions: user_settings.effective_permissions(&self.manifest_settings).back,
-            data_dir: user_settings.data_dir(data_root, name),
-        }
+            data_dir,
+            database_path,
+        })
     }
 
     /// The version the lapp last ran with, if it is known and not the one of the manifest.
@@ -582,6 +600,7 @@ impl LappState {
         let mut store = Store::new(engine, states);
         store.limiter(|states| &mut states.limits);
         store.set_epoch_deadline(limits.deadline_ticks());
+        store.data().deadline.set(limits.call_deadline());
 
         let instance = pre
             .instance_pre()
@@ -604,7 +623,7 @@ impl LappState {
         previous_version: Option<&str>,
         limits: &InstanceLimits,
     ) -> wasmtime::Result<Result<(), String>> {
-        self.store.set_epoch_deadline(limits.deadline_ticks());
+        self.start_call(limits);
         let init = self
             .instance
             .get_typed_func::<(Option<&str>,), (Result<(), String>,)>(&mut self.store, init)
@@ -614,8 +633,15 @@ impl LappState {
         Ok(result?.0)
     }
 
-    fn http_handle(&mut self, request: &Request, limits: &InstanceLimits) -> wasmtime::Result<Response> {
+    /// The deadlines of a call: the epoch one of the backend code, and that of its database
+    /// statements, which the epoch does not interrupt.
+    fn start_call(&mut self, limits: &InstanceLimits) {
         self.store.set_epoch_deadline(limits.deadline_ticks());
+        self.store.data().deadline.set(limits.call_deadline());
+    }
+
+    fn http_handle(&mut self, request: &Request, limits: &InstanceLimits) -> wasmtime::Result<Response> {
+        self.start_call(limits);
         let response = self
             .back_instance
             .laplace_lapp_handler()

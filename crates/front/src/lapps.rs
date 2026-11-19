@@ -26,16 +26,28 @@ pub fn register_actions() {
 }
 
 pub fn list() -> impl Renderable {
-    let lapps = vec![Lapp {
-        name: "echo".to_string(),
-        enabled: true,
-        title: "Echo".to_string(),
-        autoload: true,
-        permissions: Permissions {
-            allowed: vec!["test".to_string()],
-            required: vec!["test".to_string(), "prod".to_string()],
+    let lapps = vec![
+        Lapp {
+            name: "echo".to_string(),
+            enabled: true,
+            title: "Echo".to_string(),
+            autoload: true,
+            permissions: Permissions {
+                allowed: vec!["test".to_string()],
+                required: vec!["test".to_string(), "prod".to_string()],
+            },
         },
-    }];
+        Lapp {
+            name: "todo".to_string(),
+            enabled: true,
+            title: "Todo".to_string(),
+            autoload: false,
+            permissions: Permissions {
+                allowed: vec!["database".to_string()],
+                required: vec!["database".to_string()],
+            },
+        },
+    ];
 
     rsx! {
         <div class = "content-container">

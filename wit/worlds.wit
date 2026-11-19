@@ -2,10 +2,12 @@ package laplace:lapp@0.1.0;
 
 /// What every lapp backend is.
 ///
-/// The host capabilities of the later stages are imported here, every one of them: the host always
-/// links them all (without a permission, a stub that refuses), and a built component keeps only the
-/// imports its code calls.
+/// The host capabilities are imported here, every one of them: the host always links them all, and
+/// every function of one refuses without its permission; a built component keeps only the imports its
+/// code calls.
 world back {
+    import database;
+
     export types;
     export handler;
 }

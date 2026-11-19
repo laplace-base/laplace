@@ -1,0 +1,12 @@
+[application]
+title = "Todo"
+version = "0.1.0"
+description = "The Todo local-first web app example"
+tags = ["example", "todo"]
+
+[required.permissions]
+front = ["invoke_back"]
+back = ["database"]
+
+[database]
+path = "todos.db"

@@ -9,6 +9,8 @@ use wasmtime::component::ResourceTable;
 use wasmtime_wasi::{FsPerms, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
 use self::output::LogOutput;
+use crate::api::http::laplace::lapp::database::{Host as DatabaseHost, Row, Value};
+use crate::database::{self, CallDeadline, Database};
 
 pub mod output;
 
@@ -20,6 +22,8 @@ pub struct InstanceContext {
     pub permissions: Vec<BackPermission>,
     /// The data directory of the lapp.
     pub data_dir: PathBuf,
+    /// The database file of the lapp, inside its data directory.
+    pub database_path: PathBuf,
 }
 
 impl InstanceContext {
@@ -41,6 +45,9 @@ pub struct WasiStates {
     ctx: WasiCtx,
     stdout: LogOutput,
     stderr: LogOutput,
+    permissions: Vec<BackPermission>,
+    database: Database,
+    pub deadline: CallDeadline,
     pub limits: StoreLimits,
 }
 
@@ -64,12 +71,16 @@ impl WasiStates {
                 .map_err(|err| anyhow!("Failed to open the data directory '{}': {err:#}", data_dir.display()))?;
         }
         let ctx = builder.build();
+        let deadline = CallDeadline::default();
 
         Ok(Self {
             table: ResourceTable::new(),
             ctx,
             stdout,
             stderr,
+            permissions: context.permissions.clone(),
+            database: Database::new(context.database_path.clone(), deadline.clone()),
+            deadline,
             limits: StoreLimits::default(),
         })
     }
@@ -79,6 +90,36 @@ impl WasiStates {
     pub fn flush_output(&self) {
         self.stdout.flush();
         self.stderr.flush();
+    }
+}
+
+impl WasiStates {
+    /// Refuses a host function without its permission.
+    fn check(&self, permission: BackPermission) -> Result<(), String> {
+        if self.permissions.contains(&permission) {
+            Ok(())
+        } else {
+            Err(format!("permission denied: {}", permission.as_str()))
+        }
+    }
+
+    fn database(&mut self) -> Result<&rusqlite::Connection, String> {
+        self.check(BackPermission::Database)?;
+        self.database.connection()
+    }
+}
+
+impl DatabaseHost for WasiStates {
+    fn execute(&mut self, sql: String, params: Vec<Value>) -> Result<u64, String> {
+        database::execute(self.database()?, &sql, params).map_err(|err| err.to_string())
+    }
+
+    fn query(&mut self, sql: String, params: Vec<Value>) -> Result<Vec<Row>, String> {
+        database::query(self.database()?, &sql, params).map_err(|err| err.to_string())
+    }
+
+    fn query_row(&mut self, sql: String, params: Vec<Value>) -> Result<Option<Row>, String> {
+        database::query_row(self.database()?, &sql, params).map_err(|err| err.to_string())
     }
 }
 
