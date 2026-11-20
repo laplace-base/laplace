@@ -2,7 +2,7 @@
 //! a frontend in check that every engine has — WebKitGTK and WKWebView cannot intercept them.
 
 use laplace_settings::lapp::access::FrontPermission;
-use laplace_settings::lapp::{HttpHosts, PermissionsSettings};
+use laplace_settings::lapp::{EffectiveHosts, PermissionsSettings};
 
 use crate::assets::lapp_scheme;
 
@@ -11,7 +11,7 @@ use crate::assets::lapp_scheme;
 ///
 /// Without `http` and `websocket` the frontend reaches nothing but its own origin, in both forms,
 /// and the Tauri IPC; with them, only `hosts`.
-pub fn policy(lapp_name: &str, permissions: &PermissionsSettings, hosts: &HttpHosts) -> String {
+pub fn policy(lapp_name: &str, permissions: &PermissionsSettings, hosts: &EffectiveHosts) -> String {
     let scheme = lapp_scheme(lapp_name);
     let own = format!("'self' {scheme}: http://{scheme}.localhost https://{scheme}.localhost");
 
@@ -23,9 +23,9 @@ pub fn policy(lapp_name: &str, permissions: &PermissionsSettings, hosts: &HttpHo
         }
 
         match hosts {
-            HttpHosts::All => sources.push_str(&format!(" {scheme}:")),
-            HttpHosts::List(hosts) => {
-                for host in hosts {
+            EffectiveHosts::All(_) => sources.push_str(&format!(" {scheme}:")),
+            EffectiveHosts::List(hosts) => {
+                for host in hosts.iter().map(|entry| &entry.host) {
                     if is_valid_host(host) {
                         sources.push_str(&format!(" {scheme}://{host}"));
                     }
@@ -65,7 +65,21 @@ fn is_valid_host(host: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use laplace_settings::lapp::{EffectiveHost, HttpHosts, HttpMethods};
+
     use super::*;
+
+    fn effective_hosts(hosts: &[&str]) -> EffectiveHosts {
+        EffectiveHosts::List(
+            hosts
+                .iter()
+                .map(|&host| EffectiveHost {
+                    host: host.into(),
+                    methods: HttpMethods::All,
+                })
+                .collect(),
+        )
+    }
 
     fn permissions(front: &[FrontPermission]) -> PermissionsSettings {
         PermissionsSettings {
@@ -83,7 +97,11 @@ mod tests {
 
     #[test]
     fn without_permissions_only_the_own_origin_and_ipc() {
-        let policy = policy("echo", &permissions(&[FrontPermission::InvokeBack]), &HttpHosts::All);
+        let policy = policy(
+            "echo",
+            &permissions(&[FrontPermission::InvokeBack]),
+            &EffectiveHosts::All(HttpMethods::All),
+        );
 
         assert_eq!(
             directive(&policy, "connect-src"),
@@ -103,7 +121,7 @@ mod tests {
 
     #[test]
     fn http_opens_the_manifest_hosts() {
-        let hosts = HttpHosts::List(vec!["api.example.org".into(), "*.cdn.example.org".into()]);
+        let hosts = effective_hosts(&["api.example.org", "*.cdn.example.org"]);
         let policy = policy("echo", &permissions(&[FrontPermission::Http]), &hosts);
 
         for name in ["connect-src", "img-src"] {
@@ -116,7 +134,11 @@ mod tests {
 
     #[test]
     fn http_without_hosts_opens_nothing() {
-        let policy = policy("echo", &permissions(&[FrontPermission::Http]), &HttpHosts::new());
+        let policy = policy(
+            "echo",
+            &permissions(&[FrontPermission::Http]),
+            &EffectiveHosts::default(),
+        );
 
         for name in ["connect-src", "img-src"] {
             let directive = directive(&policy, name);
@@ -131,7 +153,11 @@ mod tests {
 
     #[test]
     fn http_with_all_hosts_opens_https() {
-        let policy = policy("echo", &permissions(&[FrontPermission::Http]), &HttpHosts::All);
+        let policy = policy(
+            "echo",
+            &permissions(&[FrontPermission::Http]),
+            &EffectiveHosts::All(HttpMethods::All),
+        );
 
         assert!(directive(&policy, "connect-src").ends_with(" https:"));
         assert!(directive(&policy, "img-src").ends_with(" https:"));
@@ -139,7 +165,7 @@ mod tests {
 
     #[test]
     fn websocket_opens_wss_to_the_manifest_hosts() {
-        let hosts = HttpHosts::List(vec!["ws.example.org".into()]);
+        let hosts = effective_hosts(&["ws.example.org"]);
         let policy = policy("echo", &permissions(&[FrontPermission::Websocket]), &hosts);
 
         let connect = directive(&policy, "connect-src");
@@ -150,11 +176,29 @@ mod tests {
 
     #[test]
     fn a_host_that_is_not_a_host_name_is_left_out() {
-        let hosts = HttpHosts::List(vec!["evil.org; script-src *".into(), "ok.org".into()]);
+        let hosts = effective_hosts(&["evil.org; script-src *", "ok.org"]);
         let policy = policy("echo", &permissions(&[FrontPermission::Http]), &hosts);
 
         assert!(!policy.contains("evil.org"));
         assert!(!policy.contains("script-src *"));
         assert!(directive(&policy, "connect-src").contains(" https://ok.org"));
+    }
+
+    #[test]
+    fn user_host_is_in_the_policy_with_user_hosts_only() {
+        let requested = HttpHosts::List(vec!["api.example.org".into()]);
+        let allowed = HttpHosts::List(vec!["api.example.org".into(), "own.example.net".into()]);
+        let policy_with = |user_hosts| {
+            let hosts = EffectiveHosts::resolve(&requested, user_hosts, &HttpMethods::All, &allowed);
+            policy("echo", &permissions(&[FrontPermission::Http]), &hosts)
+        };
+
+        let with = policy_with(true);
+        assert!(directive(&with, "connect-src").contains("https://api.example.org"));
+        assert!(directive(&with, "connect-src").contains("https://own.example.net"));
+
+        let without = policy_with(false);
+        assert!(directive(&without, "connect-src").contains("https://api.example.org"));
+        assert!(!without.contains("own.example.net"));
     }
 }

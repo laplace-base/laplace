@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_with::skip_serializing_none;
 
 use crate::lapp::access::{BackPermission, FrontPermission, Permission};
@@ -176,18 +176,23 @@ impl HttpSettings {
 pub struct FrontHttpSettings {
     #[serde(default, skip_serializing_if = "HttpHosts::is_empty")]
     pub hosts: HttpHosts,
+
+    /// In a manifest: the user may allow hosts it does not list.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub user_hosts: bool,
 }
 
 impl FrontHttpSettings {
     pub const fn new() -> Self {
         Self {
             hosts: HttpHosts::new(),
+            user_hosts: false,
         }
     }
 
     pub const fn is_empty(&self) -> bool {
-        let Self { hosts } = self;
-        hosts.is_empty()
+        let Self { hosts, user_hosts } = self;
+        hosts.is_empty() && !*user_hosts
     }
 }
 
@@ -196,8 +201,13 @@ pub struct BackHttpSettings {
     #[serde(default, skip_serializing_if = "HttpHosts::is_empty")]
     pub hosts: HttpHosts,
 
+    /// The methods of the hosts without methods of their own.
     #[serde(default, skip_serializing_if = "HttpMethods::is_empty")]
     pub methods: HttpMethods,
+
+    /// In a manifest: the user may allow hosts it does not list.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub user_hosts: bool,
 
     #[serde(
         default = "BackHttpSettings::default_timeout_ms",
@@ -217,6 +227,7 @@ impl BackHttpSettings {
         Self {
             hosts: HttpHosts::new(),
             methods: HttpMethods::new(),
+            user_hosts: false,
             timeout_ms: Self::default_timeout_ms(),
         }
     }
@@ -225,9 +236,10 @@ impl BackHttpSettings {
         let Self {
             hosts,
             methods,
+            user_hosts,
             timeout_ms,
         } = self;
-        hosts.is_empty() && methods.is_empty() && Self::is_timeout_default(timeout_ms)
+        hosts.is_empty() && methods.is_empty() && !*user_hosts && Self::is_timeout_default(timeout_ms)
     }
 
     const fn is_timeout_default(timeout_ms: &u64) -> bool {
@@ -239,13 +251,76 @@ impl BackHttpSettings {
     }
 }
 
-/// Hosts of external HTTP access separately for either half of the lapp: what the user allows of
-/// the manifest, or what comes into effect.
+/// The hosts either half of the lapp actually reaches.
 #[derive(Debug, Default, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct HttpHostsSettings {
-    pub front: HttpHosts,
-    pub back: HttpHosts,
+    pub front: EffectiveHosts,
+    pub back: EffectiveHosts,
+}
+
+/// The hosts a half of the lapp actually reaches, every one with its methods: those the manifest
+/// asks for and the user allows, narrowed by the user.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EffectiveHosts {
+    All(HttpMethods),
+    List(Vec<EffectiveHost>),
+}
+
+impl Default for EffectiveHosts {
+    fn default() -> Self {
+        Self::List(Vec::new())
+    }
+}
+
+impl EffectiveHosts {
+    pub fn is_empty(&self) -> bool {
+        matches!(self, Self::List(hosts) if hosts.is_empty())
+    }
+
+    /// The hosts of the manifest that the user allows.
+    ///
+    /// The methods of a host are its own of the manifest, or `default`, narrowed by those of the
+    /// user. A host the manifest does not list is allowed only with `user_hosts`, which `"all"` of
+    /// the manifest implies; `"all"` of the user is every host of the manifest.
+    pub fn resolve(requested: &HttpHosts, user_hosts: bool, default: &HttpMethods, allowed: &HttpHosts) -> Self {
+        let narrowed = |methods: &HttpMethods, entry: &HttpHostEntry| match &entry.methods {
+            Some(narrowing) => methods.intersect(narrowing),
+            None => methods.clone(),
+        };
+
+        match (requested, allowed) {
+            (HttpHosts::All, HttpHosts::All) => Self::All(default.clone()),
+            (HttpHosts::List(requested), HttpHosts::All) => Self::List(
+                requested
+                    .iter()
+                    .map(|entry| EffectiveHost {
+                        host: entry.host.clone(),
+                        methods: entry.methods.clone().unwrap_or_else(|| default.clone()),
+                    })
+                    .collect(),
+            ),
+            (requested, HttpHosts::List(allowed)) => Self::List(
+                allowed
+                    .iter()
+                    .filter_map(|entry| {
+                        let methods = match requested {
+                            HttpHosts::All => default,
+                            HttpHosts::List(requested) => match requested.iter().find(|asked| asked.is(&entry.host)) {
+                                Some(asked) => asked.methods.as_ref().unwrap_or(default),
+                                None if user_hosts => default,
+                                None => return None,
+                            },
+                        };
+                        Some(EffectiveHost {
+                            host: entry.host.clone(),
+                            methods: narrowed(methods, entry),
+                        })
+                    })
+                    .collect(),
+            ),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -274,7 +349,7 @@ impl HttpMethod {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum HttpMethods {
     #[serde(with = "all_str")]
@@ -298,6 +373,17 @@ impl HttpMethods {
         matches!(self, Self::List(methods) if methods.is_empty())
     }
 
+    /// The methods among both.
+    pub fn intersect(&self, other: &Self) -> Self {
+        match (self, other) {
+            (Self::All, other) => other.clone(),
+            (this, Self::All) => this.clone(),
+            (Self::List(these), Self::List(those)) => {
+                Self::List(these.iter().copied().filter(|method| those.contains(method)).collect())
+            },
+        }
+    }
+
     /// Whether the HTTP method `method` (`GET`, `post`, …) is among these.
     pub fn allows(&self, method: &str) -> bool {
         match self {
@@ -316,7 +402,104 @@ pub enum HttpHosts {
     #[serde(with = "all_str")]
     All,
 
-    List(Vec<String>),
+    List(Vec<HttpHostEntry>),
+}
+
+/// A host entry — `host`, `host:port` or `*.domain` — with its methods: as they are written
+/// ([`HttpHostEntry`]) or as they come into effect ([`EffectiveHost`]).
+///
+/// In TOML an entry without methods of its own is a string, `"api.example.org"`, and one with them a
+/// table, `{ host = "api.example.org", methods = ["get"] }`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostEntry<M> {
+    pub host: String,
+    pub methods: M,
+}
+
+/// An entry of a manifest or of the user decisions; `None` is no methods of its own: the default ones
+/// of the manifest, or no narrowing by the user.
+pub type HttpHostEntry = HostEntry<Option<HttpMethods>>;
+
+/// An effective entry: its methods are those that come into effect.
+pub type EffectiveHost = HostEntry<HttpMethods>;
+
+impl<M> HostEntry<M> {
+    /// Whether this is the entry of `host`, as it is written.
+    pub fn is(&self, host: &str) -> bool {
+        self.host.eq_ignore_ascii_case(host)
+    }
+}
+
+impl From<&str> for HttpHostEntry {
+    fn from(host: &str) -> Self {
+        host.to_owned().into()
+    }
+}
+
+impl From<String> for HttpHostEntry {
+    fn from(host: String) -> Self {
+        Self { host, methods: None }
+    }
+}
+
+/// The methods of a [`HostEntry`]; unset ones are written as a bare host string.
+pub trait EntryMethods: Default {
+    fn is_unset(&self) -> bool;
+}
+
+impl EntryMethods for Option<HttpMethods> {
+    fn is_unset(&self) -> bool {
+        self.is_none()
+    }
+}
+
+impl EntryMethods for HttpMethods {
+    fn is_unset(&self) -> bool {
+        false
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(untagged, bound = "M: Deserialize<'de> + Default")]
+enum HostEntryRepr<M> {
+    Host(String),
+    Table {
+        host: String,
+        #[serde(default)]
+        methods: M,
+    },
+}
+
+impl<'de, M: EntryMethods + Deserialize<'de>> Deserialize<'de> for HostEntry<M> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(match HostEntryRepr::<M>::deserialize(deserializer)? {
+            HostEntryRepr::Host(host) => Self {
+                host,
+                methods: M::default(),
+            },
+            HostEntryRepr::Table { host, methods } => Self { host, methods },
+        })
+    }
+}
+
+impl<M: EntryMethods + Serialize> Serialize for HostEntry<M> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        #[derive(Serialize)]
+        struct Table<'a, M> {
+            host: &'a str,
+            methods: &'a M,
+        }
+
+        if self.methods.is_unset() {
+            serializer.serialize_str(&self.host)
+        } else {
+            Table {
+                host: &self.host,
+                methods: &self.methods,
+            }
+            .serialize(serializer)
+        }
+    }
 }
 
 impl Default for HttpHosts {
@@ -334,16 +517,8 @@ impl HttpHosts {
         matches!(self, Self::List(hosts) if hosts.is_empty())
     }
 
-    /// The hosts of `self` that `allowed`, a choice among them, lets through: `"all"` of it is all
-    /// of `self`, a host of it that `self` does not have is none.
-    pub fn allowed_by(&self, allowed: &Self) -> Self {
-        match (self, allowed) {
-            (Self::All, allowed) => allowed.clone(),
-            (Self::List(hosts), Self::All) => Self::List(hosts.clone()),
-            (Self::List(hosts), Self::List(allowed)) => {
-                Self::List(hosts.iter().filter(|host| allowed.contains(host)).cloned().collect())
-            },
-        }
+    fn has_methods(&self) -> bool {
+        matches!(self, Self::List(hosts) if hosts.iter().any(|entry| entry.methods.is_some()))
     }
 }
 
@@ -424,6 +599,16 @@ pub struct LappSettings {
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub lapp_requests: Vec<LappRequestsSettings>,
+}
+
+impl LappSettings {
+    /// What the format allows but the platform cannot do.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.network.http.front.hosts.has_methods() {
+            return Err("the front hosts cannot have methods: the CSP of the lapp window does not limit them".into());
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
@@ -524,25 +709,28 @@ impl LappUserSettings {
         let permissions = self.effective_permissions(manifest);
         let requested = &manifest.required.network.http;
         let allowed = &self.allowed.network.http;
-        let effective = |has_permission: bool, requested: &HttpHosts, allowed: &HttpHosts| {
-            if has_permission {
-                requested.allowed_by(allowed)
-            } else {
-                HttpHosts::new()
-            }
-        };
 
         HttpHostsSettings {
-            front: effective(
-                permissions.front.contains(&FrontPermission::Http),
-                &requested.front.hosts,
-                &allowed.front.hosts,
-            ),
-            back: effective(
-                permissions.back.contains(&BackPermission::Http),
-                &requested.back.hosts,
-                &allowed.back.hosts,
-            ),
+            front: if permissions.front.contains(&FrontPermission::Http) {
+                EffectiveHosts::resolve(
+                    &requested.front.hosts,
+                    requested.front.user_hosts,
+                    &HttpMethods::All,
+                    &allowed.front.hosts,
+                )
+            } else {
+                EffectiveHosts::default()
+            },
+            back: if permissions.back.contains(&BackPermission::Http) {
+                EffectiveHosts::resolve(
+                    &requested.back.hosts,
+                    requested.back.user_hosts,
+                    &requested.back.methods,
+                    &allowed.back.hosts,
+                )
+            } else {
+                EffectiveHosts::default()
+            },
         }
     }
 
@@ -735,7 +923,7 @@ mod tests {
     }
 
     fn hosts(hosts: &[&str]) -> HttpHosts {
-        HttpHosts::List(hosts.iter().map(|host| host.to_string()).collect())
+        HttpHosts::List(hosts.iter().map(|&host| host.into()).collect())
     }
 
     #[cfg(feature = "io")]
@@ -757,16 +945,125 @@ mod tests {
         assert!(!HttpMethods::List(Vec::new()).allows("GET"));
     }
 
-    #[test]
-    fn allowed_hosts_are_a_choice_among_the_requested() {
-        let requested = hosts(&["a.org", "b.org"]);
+    fn effective(entries: &[(&str, HttpMethods)]) -> EffectiveHosts {
+        EffectiveHosts::List(
+            entries
+                .iter()
+                .map(|(host, methods)| EffectiveHost {
+                    host: (*host).into(),
+                    methods: methods.clone(),
+                })
+                .collect(),
+        )
+    }
 
-        assert_eq!(requested.allowed_by(&HttpHosts::All), requested);
-        assert_eq!(requested.allowed_by(&hosts(&["b.org", "c.org"])), hosts(&["b.org"]));
-        assert_eq!(requested.allowed_by(&HttpHosts::new()), HttpHosts::new());
-        assert_eq!(HttpHosts::All.allowed_by(&hosts(&["c.org"])), hosts(&["c.org"]));
-        assert_eq!(HttpHosts::All.allowed_by(&HttpHosts::All), HttpHosts::All);
-        assert!(HttpHosts::new().allowed_by(&HttpHosts::All).is_empty());
+    fn methods(methods: &[HttpMethod]) -> HttpMethods {
+        HttpMethods::List(methods.to_vec())
+    }
+
+    fn entry(host: &str, entry_methods: &[HttpMethod]) -> HttpHostEntry {
+        HttpHostEntry {
+            host: host.into(),
+            methods: Some(methods(entry_methods)),
+        }
+    }
+
+    #[cfg(feature = "io")]
+    #[test]
+    fn host_entries_parse_as_strings_tables_and_all() {
+        #[derive(Deserialize, Serialize)]
+        struct Hosts {
+            hosts: HttpHosts,
+        }
+
+        let mixed: Hosts =
+            toml::from_str(r#"hosts = ["api.org", { host = "up.org", methods = ["post"] }, { host = "x.org" }]"#)
+                .unwrap();
+        assert_eq!(
+            mixed.hosts,
+            HttpHosts::List(vec![
+                "api.org".into(),
+                entry("up.org", &[HttpMethod::Post]),
+                "x.org".into()
+            ])
+        );
+        assert_eq!(
+            toml::to_string(&mixed).unwrap(),
+            "hosts = [\"api.org\", { host = \"up.org\", methods = [\"post\"] }, \"x.org\"]\n"
+        );
+
+        let all: Hosts = toml::from_str(r#"hosts = "all""#).unwrap();
+        assert_eq!(all.hosts, HttpHosts::All);
+    }
+
+    #[cfg(feature = "io")]
+    #[test]
+    fn effective_host_is_always_a_table() {
+        #[derive(Deserialize, Serialize)]
+        struct Hosts {
+            hosts: Vec<EffectiveHost>,
+        }
+
+        let hosts = Hosts {
+            hosts: vec![EffectiveHost {
+                host: "api.org".into(),
+                methods: HttpMethods::All,
+            }],
+        };
+        let written = toml::to_string(&hosts).unwrap();
+        assert_eq!(written, "[[hosts]]\nhost = \"api.org\"\nmethods = \"all\"\n");
+        assert_eq!(toml::from_str::<Hosts>(&written).unwrap().hosts, hosts.hosts);
+    }
+
+    #[test]
+    fn front_hosts_have_no_methods() {
+        let mut settings = LappSettings::default();
+        settings.network.http.front.hosts = HttpHosts::List(vec!["api.org".into()]);
+        assert!(settings.validate().is_ok());
+
+        settings.network.http.front.hosts = HttpHosts::List(vec![entry("api.org", &[HttpMethod::Get])]);
+        assert!(settings.validate().unwrap_err().contains("CSP"));
+    }
+
+    #[test]
+    fn effective_hosts_are_the_allowed_of_the_requested_with_narrowed_methods() {
+        use HttpMethod::*;
+
+        let requested = HttpHosts::List(vec!["a.org".into(), entry("b.org", &[Get, Post])]);
+        let default = methods(&[Get]);
+        let resolve =
+            |user_hosts, allowed: &HttpHosts| EffectiveHosts::resolve(&requested, user_hosts, &default, allowed);
+
+        // "all" of the user is every host of the manifest, not any host.
+        let all = effective(&[("a.org", methods(&[Get])), ("b.org", methods(&[Get, Post]))]);
+        assert_eq!(resolve(false, &HttpHosts::All), all);
+        assert_eq!(resolve(true, &HttpHosts::All), all);
+
+        let allowed = HttpHosts::List(vec!["B.org".into(), entry("a.org", &[Post]), "c.org".into()]);
+        assert_eq!(
+            resolve(false, &allowed),
+            effective(&[("B.org", methods(&[Get, Post])), ("a.org", methods(&[]))])
+        );
+        assert_eq!(
+            resolve(true, &allowed),
+            effective(&[
+                ("B.org", methods(&[Get, Post])),
+                ("a.org", methods(&[])),
+                ("c.org", methods(&[Get]))
+            ])
+        );
+
+        let narrowed = HttpHosts::List(vec![entry("b.org", &[Post, Delete])]);
+        assert_eq!(resolve(false, &narrowed), effective(&[("b.org", methods(&[Post]))]));
+        assert!(resolve(false, &HttpHosts::new()).is_empty());
+
+        // "all" of the manifest lets the user name any host, and "all" itself.
+        let any = |allowed: &HttpHosts| EffectiveHosts::resolve(&HttpHosts::All, false, &default, allowed);
+        assert_eq!(any(&HttpHosts::All), EffectiveHosts::All(methods(&[Get])));
+        assert_eq!(
+            any(&HttpHosts::List(vec!["z.org".into()])),
+            effective(&[("z.org", methods(&[Get]))])
+        );
     }
 
     #[test]
@@ -776,6 +1073,7 @@ mod tests {
             http: HttpSettings {
                 front: FrontHttpSettings {
                     hosts: hosts(&["cdn.org", "api.org"]),
+                    ..FrontHttpSettings::new()
                 },
                 back: BackHttpSettings {
                     hosts: HttpHosts::All,
@@ -792,6 +1090,7 @@ mod tests {
         user.allowed.network.http = HttpSettings {
             front: FrontHttpSettings {
                 hosts: hosts(&["api.org", "other.org"]),
+                ..FrontHttpSettings::new()
             },
             back: BackHttpSettings {
                 hosts: hosts(&["any.org"]),
@@ -799,12 +1098,22 @@ mod tests {
             },
         };
         assert_eq!(user.effective_http_hosts(&manifest), HttpHostsSettings {
-            front: hosts(&["api.org"]),
-            back: HttpHosts::new(),
+            front: effective(&[("api.org", HttpMethods::All)]),
+            back: EffectiveHosts::default(),
         });
 
         user.allow_back(BackPermission::Http);
-        assert_eq!(user.effective_http_hosts(&manifest).back, hosts(&["any.org"]));
+        assert_eq!(
+            user.effective_http_hosts(&manifest).back,
+            effective(&[("any.org", HttpMethods::All)])
+        );
+
+        // The front hosts the user adds go only with `user_hosts` of the manifest.
+        manifest.required.network.http.front.user_hosts = true;
+        assert_eq!(
+            user.effective_http_hosts(&manifest).front,
+            effective(&[("api.org", HttpMethods::All), ("other.org", HttpMethods::All)])
+        );
     }
 
     #[test]

@@ -816,10 +816,33 @@ fn http_server(answers: bool) -> u16 {
             thread::spawn(move || {
                 use std::io::{BufRead, BufReader, Write};
 
+                // The whole request is read, its body too: a socket closed with unread data is reset,
+                // and the client gets no answer.
                 let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let (mut content_length, mut chunked) = (0, false);
                 let mut line = String::new();
                 while reader.read_line(&mut line).is_ok_and(|read| read > 2) {
+                    let header = line.to_ascii_lowercase();
+                    if let Some(length) = header.strip_prefix("content-length:") {
+                        content_length = length.trim().parse().unwrap_or(0);
+                    }
+                    chunked |= header.starts_with("transfer-encoding:") && header.contains("chunked");
                     line.clear();
+                }
+                if chunked {
+                    loop {
+                        line.clear();
+                        if reader.read_line(&mut line).unwrap_or(0) == 0 {
+                            break;
+                        }
+                        let size = usize::from_str_radix(line.trim(), 16).unwrap_or(0);
+                        let mut chunk = vec![0; size + 2];
+                        if std::io::Read::read_exact(&mut reader, &mut chunk).is_err() || size == 0 {
+                            break;
+                        }
+                    }
+                } else {
+                    std::io::Read::read_exact(&mut reader, &mut vec![0; content_length]).ok();
                 }
                 if answers {
                     stream
@@ -909,4 +932,30 @@ fn outgoing_http_times_out_and_the_back_goes_on() {
     assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
 
     assert_eq!(request(&state, "stress", "ok").unwrap(), "ok");
+}
+
+#[test]
+fn outgoing_http_methods_are_of_the_host_entry() {
+    let port = http_server(true);
+    let required = format!("[{{ host = \"127.0.0.1:{port}\", methods = [\"post\"] }}]");
+    let allowed = format!("[\"127.0.0.1:{port}\"]");
+    let (_fixture, state) = http_fixture("http-entry-methods", &required, &allowed, true);
+
+    let url = format!("url=http://127.0.0.1:{port}/");
+    assert_eq!(fetch(&state, &format!("{url}&method=POST")), "200 hello");
+    let answer = fetch(&state, &url);
+    assert!(answer.starts_with("denied"), "{answer}");
+}
+
+#[test]
+fn outgoing_http_methods_narrowed_by_the_user() {
+    let port = http_server(true);
+    let required = format!("[{{ host = \"127.0.0.1:{port}\", methods = [\"get\", \"post\"] }}]");
+    let allowed = format!("[{{ host = \"127.0.0.1:{port}\", methods = [\"get\"] }}]");
+    let (_fixture, state) = http_fixture("http-user-methods", &required, &allowed, true);
+
+    let url = format!("url=http://127.0.0.1:{port}/");
+    assert_eq!(fetch(&state, &url), "200 hello");
+    let answer = fetch(&state, &format!("{url}&method=POST"));
+    assert!(answer.starts_with("denied"), "{answer}");
 }

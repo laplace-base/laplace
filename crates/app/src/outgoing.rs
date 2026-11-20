@@ -1,5 +1,6 @@
 //! The outgoing HTTP of a lapp backend: `wasi:http`, let through only with the `http` permission of
-//! the back, to its effective hosts, by the methods and within the timeout of its manifest.
+//! the back, to its effective hosts, by the methods of the closest of them and within the timeout of
+//! its manifest.
 
 use std::future::Future;
 use std::net::IpAddr;
@@ -8,7 +9,7 @@ use std::time::Duration;
 
 use http::uri::{Authority, Scheme};
 use http_body_util::BodyExt;
-use laplace_settings::lapp::{HttpHosts, HttpMethods};
+use laplace_settings::lapp::{EffectiveHosts, HttpMethods};
 use wasmtime_wasi_http::{Error, RequestOptions, WasiBody, WasiHttpHooks, default_send_request};
 
 /// What the backend of a lapp may reach over HTTP.
@@ -17,20 +18,29 @@ pub struct HttpAccess {
     pub lapp_name: String,
     /// Whether the back has the effective `http` permission.
     pub permitted: bool,
-    /// The effective hosts of the back: `host` or `host:port`, `*.domain`, or all.
-    pub hosts: HttpHosts,
-    pub methods: HttpMethods,
+    /// The effective hosts of the back — `host` or `host:port`, `*.domain`, or all — with their
+    /// methods.
+    pub hosts: EffectiveHosts,
     /// The limit of connecting, of the first byte and of every pause between bytes.
     pub timeout: Duration,
 }
 
-/// How the host of a request is among the hosts of the lapp; the greater is the closer.
+/// How the host of a request is among the hosts of the lapp; the greater is the closer, and the
+/// closest entry decides.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum HostMatch {
-    /// Through `*.` or `all`.
-    Broad,
+    /// Through `all`.
+    All,
+    /// Through `*.domain`, with the length of `domain`: a longer one is closer.
+    Mask(usize),
     /// Listed as it is.
     Exact,
+}
+
+impl HostMatch {
+    fn is_broad(self) -> bool {
+        self != Self::Exact
+    }
 }
 
 impl HttpAccess {
@@ -39,10 +49,6 @@ impl HttpAccess {
     pub fn check(&self, method: &str, uri: &http::Uri) -> Result<bool, String> {
         if !self.permitted {
             return Err("no `http` permission".into());
-        }
-
-        if !self.methods.allows(method) {
-            return Err(format!("the method {method} is not in the manifest"));
         }
 
         let scheme = uri.scheme().ok_or("no scheme")?;
@@ -57,12 +63,16 @@ impl HttpAccess {
         let host = host.trim_start_matches('[').trim_end_matches(']');
         let port = uri.port_u16().unwrap_or(default_port);
 
-        let matched = self
+        let (matched, methods) = self
             .host_match(host, port, default_port)
             .ok_or_else(|| format!("the host {host}:{port} is not allowed"))?;
-        let ip = host.parse::<IpAddr>().ok();
 
-        if matched == HostMatch::Broad {
+        if !methods.allows(method) {
+            return Err(format!("the method {method} is not allowed for {host}:{port}"));
+        }
+
+        let ip = host.parse::<IpAddr>().ok();
+        if matched.is_broad() {
             if *scheme == Scheme::HTTP {
                 return Err(format!("plain HTTP to {host} needs the host listed as it is"));
             }
@@ -71,38 +81,18 @@ impl HttpAccess {
             }
         }
 
-        Ok(matched == HostMatch::Broad && ip.is_none())
+        Ok(matched.is_broad() && ip.is_none())
     }
 
-    fn host_match(&self, host: &str, port: u16, default_port: u16) -> Option<HostMatch> {
-        let entries = match &self.hosts {
-            HttpHosts::All => return Some(HostMatch::Broad),
-            HttpHosts::List(entries) => entries,
-        };
-
-        // The closest entry decides, whatever their order: a host listed as it is goes without the
-        // checks of `*.`, even if a mask before it matches it too.
-        entries
-            .iter()
-            .filter_map(|entry| {
-                let entry = entry.parse::<Authority>().ok()?;
-                if entry.port_u16().unwrap_or(default_port) != port {
-                    return None;
-                }
-                let entry_host = entry.host().trim_start_matches('[').trim_end_matches(']');
-
-                if entry_host.eq_ignore_ascii_case(host) {
-                    Some(HostMatch::Exact)
-                } else {
-                    let domain = entry_host.strip_prefix("*.")?;
-                    let subdomain = host.len().checked_sub(domain.len() + 1)?;
-                    (host.is_char_boundary(subdomain)
-                        && host[subdomain..].starts_with('.')
-                        && host[subdomain + 1..].eq_ignore_ascii_case(domain))
-                    .then_some(HostMatch::Broad)
-                }
-            })
-            .max()
+    /// The closest entry of `host:port` and its methods, whatever the order of the entries.
+    fn host_match(&self, host: &str, port: u16, default_port: u16) -> Option<(HostMatch, &HttpMethods)> {
+        match &self.hosts {
+            EffectiveHosts::All(methods) => Some((HostMatch::All, methods)),
+            EffectiveHosts::List(entries) => entries
+                .iter()
+                .filter_map(|entry| Some((entry_match(&entry.host, host, port, default_port)?, &entry.methods)))
+                .max_by_key(|(matched, _)| *matched),
+        }
     }
 
     /// The timeouts of the guest, none longer than that of the manifest.
@@ -126,6 +116,28 @@ impl HttpAccess {
             Err(_) => false,
         }
     }
+}
+
+/// How the entry `entry` — `host`, `host:port` or `*.domain` — matches `host:port`; an entry without a
+/// port is of the default port of the scheme only.
+fn entry_match(entry: &str, host: &str, port: u16, default_port: u16) -> Option<HostMatch> {
+    let entry = entry.parse::<Authority>().ok()?;
+
+    if entry.port_u16().unwrap_or(default_port) != port {
+        return None;
+    }
+
+    let entry_host = entry.host().trim_start_matches('[').trim_end_matches(']');
+    if entry_host.eq_ignore_ascii_case(host) {
+        return Some(HostMatch::Exact);
+    }
+
+    let domain = entry_host.strip_prefix("*.")?;
+    let subdomain_end = host.len().checked_sub(domain.len() + 1)?;
+    (host.is_char_boundary(subdomain_end)
+        && host[subdomain_end..].starts_with('.')
+        && host[subdomain_end + 1..].eq_ignore_ascii_case(domain))
+    .then_some(HostMatch::Mask(domain.len()))
 }
 
 fn is_local_name(host: &str) -> bool {
@@ -215,20 +227,38 @@ impl WasiHttpHooks for HttpHooks {
 
 #[cfg(test)]
 mod tests {
+    use laplace_settings::lapp::EffectiveHost;
+    use laplace_settings::lapp::HttpMethod::*;
+
     use super::*;
 
-    fn access(hosts: HttpHosts) -> HttpAccess {
+    fn access(hosts: EffectiveHosts) -> HttpAccess {
         HttpAccess {
             lapp_name: "test".into(),
             permitted: true,
             hosts,
-            methods: HttpMethods::All,
             timeout: Duration::from_secs(1),
         }
     }
 
-    fn list(hosts: &[&str]) -> HttpHosts {
-        HttpHosts::List(hosts.iter().map(|host| host.to_string()).collect())
+    fn all() -> EffectiveHosts {
+        EffectiveHosts::All(HttpMethods::All)
+    }
+
+    fn list(hosts: &[&str]) -> EffectiveHosts {
+        with_methods(&hosts.iter().map(|&host| (host, HttpMethods::All)).collect::<Vec<_>>())
+    }
+
+    fn with_methods(hosts: &[(&str, HttpMethods)]) -> EffectiveHosts {
+        EffectiveHosts::List(
+            hosts
+                .iter()
+                .map(|(host, methods)| EffectiveHost {
+                    host: (*host).into(),
+                    methods: methods.clone(),
+                })
+                .collect(),
+        )
     }
 
     fn check(access: &HttpAccess, method: &str, uri: &str) -> Result<bool, String> {
@@ -279,24 +309,37 @@ mod tests {
     fn no_permission_no_requests() {
         let access = HttpAccess {
             permitted: false,
-            ..access(HttpHosts::All)
+            ..access(all())
         };
         assert!(check(&access, "GET", "https://example.org/").is_err());
     }
 
     #[test]
     fn methods_of_the_manifest_only() {
-        let access = HttpAccess {
-            methods: HttpMethods::List(vec![laplace_settings::lapp::HttpMethod::Get]),
-            ..access(HttpHosts::All)
-        };
+        let access = access(EffectiveHosts::All(HttpMethods::List(vec![Get])));
         assert!(check(&access, "GET", "https://example.org/").is_ok());
         assert!(check(&access, "POST", "https://example.org/").is_err());
     }
 
     #[test]
+    fn methods_are_of_the_closest_entry() {
+        let access = access(with_methods(&[
+            ("*.example.org", HttpMethods::List(vec![Get])),
+            ("upload.example.org", HttpMethods::List(vec![Post])),
+            ("*.cdn.example.org", HttpMethods::List(vec![Head])),
+        ]));
+
+        assert!(check(&access, "POST", "https://upload.example.org/").is_ok());
+        assert!(check(&access, "GET", "https://upload.example.org/").is_err());
+        assert!(check(&access, "GET", "https://api.example.org/").is_ok());
+        assert!(check(&access, "POST", "https://api.example.org/").is_err());
+        assert!(check(&access, "HEAD", "https://a.cdn.example.org/").is_ok());
+        assert!(check(&access, "GET", "https://a.cdn.example.org/").is_err());
+    }
+
+    #[test]
     fn plain_http_and_local_hosts_need_an_exact_entry() {
-        let all = access(HttpHosts::All);
+        let all = access(all());
         assert_eq!(check(&all, "GET", "https://example.org/"), Ok(true));
         for denied in [
             "http://example.org/",
@@ -322,7 +365,7 @@ mod tests {
 
     #[test]
     fn timeouts_are_limited_by_the_manifest() {
-        let access = access(HttpHosts::All);
+        let access = access(all());
         let options = access.options(Some(RequestOptions {
             connect_timeout: Some(Duration::from_millis(100)),
             first_byte_timeout: Some(Duration::from_secs(60)),

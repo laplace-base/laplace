@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use laplace_settings::LaplaceSettings;
-use laplace_settings::lapp::{HttpHosts, MAIN_NAME};
+use laplace_settings::lapp::{EffectiveHosts, MAIN_NAME};
 use tauri::Manager as _;
 
 use crate::assets::{FsStoredAssets, NoAssets};
@@ -100,7 +100,7 @@ fn start(lang: String, lapps: LappsManager, assets: FsStoredAssets) {
                 tauri::async_runtime::spawn_blocking(move || {
                     // The launcher is not in the registry and needs nothing external.
                     let csp = app.state::<State>().lapps.lapp(&lapp_name).map_or_else(
-                        || csp::policy(&lapp_name, &Default::default(), &HttpHosts::new()),
+                        || csp::policy(&lapp_name, &Default::default(), &EffectiveHosts::default()),
                         |lapp| lapp.csp(&lapp_name),
                     );
                     responder.respond(assets.respond(&lapp_name, &webview_label, &request, &csp))

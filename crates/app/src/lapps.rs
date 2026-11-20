@@ -487,7 +487,6 @@ impl Lapp {
             lapp_name: name.into(),
             permitted: permissions.contains(&BackPermission::Http),
             hosts: user_settings.effective_http_hosts(&self.manifest_settings).back,
-            methods: back_http.methods.clone(),
             timeout: Duration::from_millis(back_http.timeout_ms),
         };
 

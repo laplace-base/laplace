@@ -16,6 +16,9 @@ pub enum LappSettingsError {
 
     #[error("Settings serialization error: {0}")]
     Serialize(#[from] toml::ser::Error),
+
+    #[error("Invalid settings: {0}")]
+    Invalid(String),
 }
 
 pub type LappSettingsResult<T> = Result<T, LappSettingsError>;
@@ -24,6 +27,7 @@ impl LappManifestSettings {
     /// Reads the manifest of the lapp `lapp_name`; the host never writes it.
     pub fn load(lapp_name: impl Into<String>, path: impl AsRef<Path>) -> LappSettingsResult<Self> {
         let mut settings: Self = toml::from_str(&fs::read_to_string(path)?)?;
+        settings.required.validate().map_err(LappSettingsError::Invalid)?;
         settings.lapp_name = lapp_name.into();
         Ok(settings)
     }
@@ -34,7 +38,11 @@ impl LappUserSettings {
     /// is no file yet.
     pub fn load(path: impl AsRef<Path>, manifest: &LappManifestSettings) -> LappSettingsResult<Self> {
         match fs::read_to_string(path) {
-            Ok(content) => Ok(toml::from_str(&content)?),
+            Ok(content) => {
+                let settings: Self = toml::from_str(&content)?;
+                settings.allowed.validate().map_err(LappSettingsError::Invalid)?;
+                Ok(settings)
+            },
             Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(Self::new(manifest)),
             Err(err) => Err(err.into()),
         }
