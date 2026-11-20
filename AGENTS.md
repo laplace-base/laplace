@@ -30,7 +30,7 @@ lapp's `handler.handle`. The Tauri window *label* is the lapp name — that is h
 | `crates/front-api` | `laplace-front-api` | wasm-side bindings to `window.__TAURI__.core.invoke` |
 | `crates/back-api` | `laplace-back-api` | SDK of lapp backs: `wit_bindgen::generate!` bindings, trait `Lapp` + `export!`, WIT ↔ `http` conversion, `Router` |
 | `examples/echo/{back,front}` | `echo-back`, `echo-front` | Reference lapp |
-| `examples/stress/back` | `stress-back` | Test-only back the host tests drive (loop, out of memory, `init`, output, panic, files) |
+| `examples/stress/back` | `stress-back` | Test-only back the host tests drive (loop, out of memory, `init`, output, panic, files, outgoing HTTP via `/fetch?url=…`) |
 | `examples/todo/{back,front,common}` | `todo-back`, `todo-front`, `todo-common` | Todo lapp (TodoMVC): tasks in the lapp database (`laplace_back_api::database`); the front hands every htmx action to its wasm `router`, which calls the back and renders `#todo` anew; the host tests run the back |
 | `wit/` | — | The WIT package `laplace:lapp` every lapp back is built for; the bindings are generated at compile time (`laplace-back-api`), nothing is committed |
 | `webassets/vendor` | — | Vendored htmx + wingy CSS, deployed as the `vendor` "app" |

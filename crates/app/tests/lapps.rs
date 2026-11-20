@@ -804,3 +804,109 @@ fn database_path_outside_the_data_directory_is_refused() {
     );
     assert!(!fixture.settings().data_root.join("todos.db").exists());
 }
+
+/// A local HTTP server for the outgoing requests: answers every one with `hello`, or never answers.
+fn http_server(answers: bool) -> u16 {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            thread::spawn(move || {
+                use std::io::{BufRead, BufReader, Write};
+
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                while reader.read_line(&mut line).is_ok_and(|read| read > 2) {
+                    line.clear();
+                }
+                if answers {
+                    stream
+                        .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello")
+                        .ok();
+                } else {
+                    thread::sleep(Duration::from_secs(30));
+                }
+            });
+        }
+    });
+    port
+}
+
+fn http_fixture(test: &str, required_hosts: &str, allowed_hosts: &str, permitted: bool) -> (Fixture, State) {
+    let manifest = format!(
+        "[application]\ntitle = \"Test\"\n\n[required.permissions]\nfront = [\"invoke_back\"]\nback = [\"http\"]\n\n\
+         [required.network.http.back]\nhosts = {required_hosts}\nmethods = [\"get\"]\ntimeout_ms = 200\n"
+    );
+    let back = if permitted { "[\"http\"]" } else { "[]" };
+    let user_config = format!(
+        "[allowed.permissions]\nfront = [\"invoke_back\"]\nback = {back}\n\n[allowed.network.http.back]\nhosts = \
+         {allowed_hosts}\n"
+    );
+
+    let fixture = Fixture::new(test);
+    fixture.lapp_with_back("stress", &manifest, Some("stress"), Some(&user_config));
+    let state = fixture.state();
+    (fixture, state)
+}
+
+fn fetch(state: &State, query: &str) -> String {
+    request(state, "stress", &format!("fetch?{query}")).unwrap()
+}
+
+#[test]
+fn outgoing_http_needs_the_permission() {
+    let port = http_server(true);
+    let host = format!("[\"127.0.0.1:{port}\"]");
+    let (_fixture, state) = http_fixture("http-denied", &host, &host, false);
+
+    let answer = fetch(&state, &format!("url=http://127.0.0.1:{port}/"));
+    assert!(answer.starts_with("denied"), "{answer}");
+}
+
+#[test]
+fn outgoing_http_reaches_a_listed_host() {
+    let port = http_server(true);
+    let host = format!("[\"127.0.0.1:{port}\"]");
+    let (_fixture, state) = http_fixture("http-listed", &host, &host, true);
+
+    assert_eq!(fetch(&state, &format!("url=http://127.0.0.1:{port}/hi")), "200 hello");
+
+    let other = http_server(true);
+    let answer = fetch(&state, &format!("url=http://127.0.0.1:{other}/"));
+    assert!(answer.starts_with("denied"), "{answer}");
+
+    let answer = fetch(&state, &format!("url=http://127.0.0.1:{port}/&method=POST"));
+    assert!(answer.starts_with("denied"), "{answer}");
+}
+
+#[test]
+fn outgoing_http_to_all_hosts_is_not_local() {
+    let port = http_server(true);
+    let (_fixture, state) = http_fixture("http-all", "\"all\"", "\"all\"", true);
+
+    for url in [
+        format!("http://127.0.0.1:{port}/"),
+        format!("https://127.0.0.1:{port}/"),
+        format!("https://localhost:{port}/"),
+    ] {
+        let answer = fetch(&state, &format!("url={url}"));
+        assert!(answer.starts_with("denied"), "{url}: {answer}");
+    }
+}
+
+#[test]
+fn outgoing_http_times_out_and_the_back_goes_on() {
+    let port = http_server(false);
+    let host = format!("[\"127.0.0.1:{port}\"]");
+    let (_fixture, state) = http_fixture("http-timeout", &host, &host, true);
+    assert_eq!(request(&state, "stress", "ok").unwrap(), "ok");
+
+    let started = Instant::now();
+    let answer = fetch(&state, &format!("url=http://127.0.0.1:{port}/"));
+    assert!(answer.starts_with("error"), "{answer}");
+    assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
+
+    assert_eq!(request(&state, "stress", "ok").unwrap(), "ok");
+}

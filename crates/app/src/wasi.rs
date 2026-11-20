@@ -7,10 +7,12 @@ use log::Level;
 use wasmtime::StoreLimits;
 use wasmtime::component::ResourceTable;
 use wasmtime_wasi::{FsPerms, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
+use wasmtime_wasi_http::{WasiHttpCtx, WasiHttpCtxView, WasiHttpView};
 
 use self::output::LogOutput;
 use crate::api::http::laplace::lapp::database::{Host as DatabaseHost, Row, Value};
 use crate::database::{self, CallDeadline, Database};
+use crate::outgoing::{HttpAccess, HttpHooks};
 
 pub mod output;
 
@@ -24,6 +26,8 @@ pub struct InstanceContext {
     pub data_dir: PathBuf,
     /// The database file of the lapp, inside its data directory.
     pub database_path: PathBuf,
+    /// The outgoing HTTP the backend may make.
+    pub http: HttpAccess,
 }
 
 impl InstanceContext {
@@ -47,6 +51,8 @@ pub struct WasiStates {
     stderr: LogOutput,
     permissions: Vec<BackPermission>,
     database: Database,
+    http_ctx: WasiHttpCtx,
+    http_hooks: HttpHooks,
     pub deadline: CallDeadline,
     pub limits: StoreLimits,
 }
@@ -80,6 +86,8 @@ impl WasiStates {
             stderr,
             permissions: context.permissions.clone(),
             database: Database::new(context.database_path.clone(), deadline.clone()),
+            http_ctx: WasiHttpCtx::new(),
+            http_hooks: HttpHooks::new(context.http.clone()),
             deadline,
             limits: StoreLimits::default(),
         })
@@ -120,6 +128,16 @@ impl DatabaseHost for WasiStates {
 
     fn query_row(&mut self, sql: String, params: Vec<Value>) -> Result<Option<Row>, String> {
         database::query_row(self.database()?, &sql, params).map_err(|err| err.to_string())
+    }
+}
+
+impl WasiHttpView for WasiStates {
+    fn http(&mut self) -> WasiHttpCtxView<'_> {
+        WasiHttpCtxView {
+            hooks: &mut self.http_hooks,
+            table: &mut self.table,
+            ctx: &mut self.http_ctx,
+        }
     }
 }
 

@@ -230,15 +230,12 @@ back с бесконечным циклом получает ошибку по �
 лаппа (`[database].path` манифеста — только относительное имя внутри него, без `..`), соединение на
 инстанс. Перенос логики `wasm_interop/database.rs`.
 
-3.3. **Исходящий HTTP** (`http` back-а): хосты — `effective_http_hosts().back`, методы и тайм-аут —
-`required.network.http.back` (`HttpMethod` пока знает только `get`/`post` — дополнить остальными).
-Стандартный `wasi:http` через `wasmtime-wasi-http` с проверкой в `WasiHttpView::send_request`
-(решено: back на `wasm32-wasip2`, клиент SDK — поверх `wasi:http`), а не свой импорт поверх `reqwest`. Запросы к
-loopback и частным сетям — только если хост указан явно, а не через `all`: иначе лапп с `all`
-достаёт локальные сервисы устройства. Именно back — место для запросов с сессией и cookie и к
-сайтам без CORS: у фронта cookie внешних сайтов общие для всех лаппов, а CORS режет ответы
-(`docs/architecture.md`, «Внешние запросы фронта»). Готово: запрос к неразрешённому хосту получает
-ошибку, к разрешённому — ответ, тайм-аут срабатывает.
+3.3. **Исходящий HTTP** (`http` back-а) — сделано (`26-11-22`): `wasi:http` через `wasmtime-wasi-http`,
+проверка в `WasiHttpHooks::send_request` (`crates/app/src/outgoing.rs`) — право, хосты
+`effective_http_hosts().back`, методы и тайм-аут `required.network.http.back` (`HttpMethod` дополнен
+`head`/`put`/`delete`/`patch`/`options`), локальные адреса и plain `http` — только для хоста, указанного
+как есть. Ограничение: DNS rebinding между проверкой и запросом не ловится. Клиент SDK —
+`laplace_back_api::http_client` поверх `wasip2`.
 
 ## Этап 4. Push между front и back (замена WebSocket)
 

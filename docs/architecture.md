@@ -240,6 +240,20 @@ stderr — `warn`, одна запись на строку, так что выв
 каждая их функция первой строкой проверяет право (`WasiStates::check`) и без него отвечает
 `permission denied: <право>`: лапп без права запускается и видит отказ при вызове.
 
+Исходящий HTTP back-а — стандартный `wasi:http` (`wasmtime-wasi-http`, `add_only_http_to_linker_sync`);
+каждый запрос проходит `HttpHooks::send_request` (`crates/app/src/outgoing.rs`), который по `HttpAccess`
+контекста инстанса проверяет право `http` back-а, метод (`required.network.http.back.methods`), хост
+(действующие хосты back-а: `host` или `host:port` — без порта только порт схемы по умолчанию, `*.domain`
+— поддомены, `all`) и схему, а без них отвечает `HttpRequestDenied`. Plain `http`, `localhost` и
+loopback, частные, link-local и прочие локальные адреса — только для хоста, указанного в списке как
+есть, не через `*.` или `all`; имя, пропущенное через них, хост сначала разрешает сам и отказывает, если
+среди адресов есть локальный. Запрос затем разрешает имя заново, так что смену адресов между двумя
+разрешениями (DNS rebinding) это не ловит. Тайм-ауты соединения, первого байта и пауз — не дольше
+`timeout_ms` манифеста; дедлайн по эпохам ожидание ответа не прерывает, поэтому `timeout_ms` должен
+быть меньше `lapps.call_timeout_ms`, иначе вызов back-а обрывается раньше запроса. В SDK —
+`laplace_back_api::http_client::send` (блокирующий, поверх крейта `wasip2`), `Error::is_denied` — отказ
+хоста. Именно back — место для запросов с cookie и к сайтам без CORS.
+
 База данных (`laplace:lapp/database@0.1.0`, `crates/app/src/database.rs`) — SQLite (`rusqlite`,
 `bundled`) в каталоге данных: файл `[database].path` манифеста — относительный путь без `..`, иначе
 `LappError::Start`, — по умолчанию `database.sqlite`. Соединение открывается при первом вызове и живёт

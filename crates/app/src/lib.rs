@@ -15,6 +15,7 @@ pub mod csp;
 pub mod database;
 pub mod lapps;
 pub mod logging;
+pub mod outgoing;
 pub mod wasi;
 
 pub struct State {

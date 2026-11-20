@@ -248,11 +248,30 @@ pub struct HttpHostsSettings {
     pub back: HttpHosts,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum HttpMethod {
     Get,
+    Head,
     Post,
+    Put,
+    Delete,
+    Patch,
+    Options,
+}
+
+impl HttpMethod {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Get => "GET",
+            Self::Head => "HEAD",
+            Self::Post => "POST",
+            Self::Put => "PUT",
+            Self::Delete => "DELETE",
+            Self::Patch => "PATCH",
+            Self::Options => "OPTIONS",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -277,6 +296,16 @@ impl HttpMethods {
 
     pub const fn is_empty(&self) -> bool {
         matches!(self, Self::List(methods) if methods.is_empty())
+    }
+
+    /// Whether the HTTP method `method` (`GET`, `post`, …) is among these.
+    pub fn allows(&self, method: &str) -> bool {
+        match self {
+            Self::All => true,
+            Self::List(methods) => methods
+                .iter()
+                .any(|allowed| allowed.as_str().eq_ignore_ascii_case(method)),
+        }
     }
 }
 
@@ -707,6 +736,25 @@ mod tests {
 
     fn hosts(hosts: &[&str]) -> HttpHosts {
         HttpHosts::List(hosts.iter().map(|host| host.to_string()).collect())
+    }
+
+    #[cfg(feature = "io")]
+    #[test]
+    fn http_methods_parse_and_allow() {
+        #[derive(Deserialize)]
+        struct Methods {
+            methods: HttpMethods,
+        }
+
+        let listed: Methods =
+            toml::from_str(r#"methods = ["get", "put", "delete", "patch", "head", "options"]"#).unwrap();
+        assert!(listed.methods.allows("GET"));
+        assert!(listed.methods.allows("patch"));
+        assert!(!listed.methods.allows("POST"));
+
+        let all: Methods = toml::from_str(r#"methods = "all""#).unwrap();
+        assert!(all.methods.allows("TRACE"));
+        assert!(!HttpMethods::List(Vec::new()).allows("GET"));
     }
 
     #[test]

@@ -5,13 +5,15 @@
 //! - prints on /print
 //! - panics on /panic
 //! - writes `/<file>` of its data directory on /write/<file>, reads it on /read/<file>
+//! - sends `<method>` (GET by default) to `<url>` on /fetch?url=<url>&method=<method> and tells the status and the body
+//!   of the answer
 
 use std::fs;
 use std::hint::black_box;
 use std::sync::Mutex;
 
 use laplace_back_api::http::{Request, Response};
-use laplace_back_api::{Lapp, api_path};
+use laplace_back_api::{Lapp, api_path, http_client};
 
 /// The `previous_version` the last `init` was given.
 static PREVIOUS_VERSION: Mutex<Option<String>> = Mutex::new(None);
@@ -63,10 +65,38 @@ impl Lapp for Stress {
             Some(path) if path.starts_with("/read/") => {
                 fs::read_to_string(&path["/read".len()..]).unwrap_or_else(|err| format!("error: {err}"))
             },
+            Some("/fetch") => fetch(request.uri().query().unwrap_or_default()),
             _ => "ok".into(),
         };
 
         Response::new(body.into_bytes())
+    }
+}
+
+/// `url` and `method` of the query are taken as they are, without percent-decoding.
+fn fetch(query: &str) -> String {
+    let param = |name: &str| {
+        query
+            .split('&')
+            .find_map(|pair| pair.strip_prefix(name)?.strip_prefix('='))
+    };
+
+    let request = Request::builder()
+        .method(param("method").unwrap_or("GET"))
+        .uri(param("url").unwrap_or_default())
+        .body(Vec::new());
+
+    match request.map_err(|err| err.to_string()) {
+        Ok(request) => match http_client::send(request) {
+            Ok(response) => format!(
+                "{} {}",
+                response.status().as_u16(),
+                String::from_utf8_lossy(response.body())
+            ),
+            Err(err) if err.is_denied() => format!("denied: {err}"),
+            Err(err) => format!("error: {err}"),
+        },
+        Err(err) => format!("error: {err}"),
     }
 }
 

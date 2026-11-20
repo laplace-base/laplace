@@ -6,7 +6,7 @@ use std::{fs, thread};
 
 use anyhow::{anyhow, bail};
 use laplace_settings::laplace::LappsSettings;
-use laplace_settings::lapp::access::{FrontPermission, Permission};
+use laplace_settings::lapp::access::{BackPermission, FrontPermission, Permission};
 use laplace_settings::lapp::file::LappSettingsError;
 use laplace_settings::lapp::update::UpdateQuery;
 use laplace_settings::lapp::{self, LappInfo, LappManifestSettings, LappUserSettings};
@@ -17,6 +17,7 @@ use wasmtime::{Config, Engine, Store, StoreLimitsBuilder, Trap};
 
 use crate::api::http::{Back, BackPre, Request, Response, laplace};
 use crate::database;
+use crate::outgoing::HttpAccess;
 use crate::wasi::{InstanceContext, WasiStates};
 
 /// The causes go into the messages, as that is all the frontend gets of an error.
@@ -101,6 +102,7 @@ impl LappsManager {
         // The host capabilities are always linked; every function checks its permission itself.
         laplace::lapp::database::add_to_linker::<_, HasSelf<WasiStates>>(&mut linker, |states| states)
             .expect("the database imports link");
+        wasmtime_wasi_http::p2::add_only_http_to_linker_sync(&mut linker).expect("the wasi:http imports link");
 
         Self {
             engine,
@@ -479,10 +481,21 @@ impl Lapp {
         let data_dir = user_settings.data_dir(data_root, name);
         let database_path = database::database_path(&data_dir, self.manifest_settings.database().path())?;
 
+        let permissions = user_settings.effective_permissions(&self.manifest_settings).back;
+        let back_http = &self.manifest_settings.required.network.http.back;
+        let http = HttpAccess {
+            lapp_name: name.into(),
+            permitted: permissions.contains(&BackPermission::Http),
+            hosts: user_settings.effective_http_hosts(&self.manifest_settings).back,
+            methods: back_http.methods.clone(),
+            timeout: Duration::from_millis(back_http.timeout_ms),
+        };
+
         Ok(InstanceContext {
-            permissions: user_settings.effective_permissions(&self.manifest_settings).back,
+            permissions,
             data_dir,
             database_path,
+            http,
         })
     }
 

@@ -22,6 +22,7 @@ pub use self::router::{Handler, Router, api_path};
 
 pub mod convert;
 pub mod database;
+pub mod http_client;
 pub mod router;
 
 #[doc(hidden)]

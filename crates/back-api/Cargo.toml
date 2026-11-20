@@ -9,4 +9,6 @@ description = "The SDK of the lapp backends of the local-first web-application p
 
 [dependencies]
 http = { workspace = true }
+thiserror = { workspace = true }
+wasip2 = { workspace = true }
 wit-bindgen = { workspace = true }
