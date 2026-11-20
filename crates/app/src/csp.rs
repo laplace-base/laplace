@@ -25,7 +25,7 @@ pub fn policy(lapp_name: &str, permissions: &PermissionsSettings, hosts: &Effect
         match hosts {
             EffectiveHosts::All(_) => sources.push_str(&format!(" {scheme}:")),
             EffectiveHosts::List(hosts) => {
-                for host in hosts.iter().map(|entry| &entry.host) {
+                for host in hosts.iter().filter_map(|entry| entry.host()) {
                     if is_valid_host(host) {
                         sources.push_str(&format!(" {scheme}://{host}"));
                     }
@@ -65,7 +65,7 @@ fn is_valid_host(host: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use laplace_settings::lapp::{EffectiveHost, HttpHosts, HttpMethods};
+    use laplace_settings::lapp::{EffectiveHost, HostTarget, HttpHosts, HttpMethods};
 
     use super::*;
 
@@ -74,7 +74,7 @@ mod tests {
             hosts
                 .iter()
                 .map(|&host| EffectiveHost {
-                    host: host.into(),
+                    target: HostTarget::Host(host.into()),
                     methods: HttpMethods::All,
                 })
                 .collect(),

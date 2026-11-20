@@ -4,11 +4,13 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_with::skip_serializing_none;
 
 use crate::lapp::access::{BackPermission, FrontPermission, Permission};
+use crate::lapp::network::Network;
 use crate::lapp::update::UpdateQuery;
 
 pub mod access;
 #[cfg(feature = "io")]
 pub mod file;
+pub mod network;
 pub mod update;
 
 /// File name of the lapp manifest in the lapp directory.
@@ -281,8 +283,9 @@ impl EffectiveHosts {
     /// The hosts of the manifest that the user allows.
     ///
     /// The methods of a host are its own of the manifest, or `default`, narrowed by those of the
-    /// user. A host the manifest does not list is allowed only with `user_hosts`, which `"all"` of
-    /// the manifest implies; `"all"` of the user is every host of the manifest.
+    /// user; a network of the user is of the manifest if it lies inside one of it, with its ports. A
+    /// host the manifest does not list is allowed only with `user_hosts`, which `"all"` of the
+    /// manifest implies; `"all"` of the user is every entry of the manifest.
     pub fn resolve(requested: &HttpHosts, user_hosts: bool, default: &HttpMethods, allowed: &HttpHosts) -> Self {
         let narrowed = |methods: &HttpMethods, entry: &HttpHostEntry| match &entry.methods {
             Some(narrowing) => methods.intersect(narrowing),
@@ -295,7 +298,7 @@ impl EffectiveHosts {
                 requested
                     .iter()
                     .map(|entry| EffectiveHost {
-                        host: entry.host.clone(),
+                        target: entry.target.clone(),
                         methods: entry.methods.clone().unwrap_or_else(|| default.clone()),
                     })
                     .collect(),
@@ -304,16 +307,21 @@ impl EffectiveHosts {
                 allowed
                     .iter()
                     .filter_map(|entry| {
-                        let methods = match requested {
-                            HttpHosts::All => default,
-                            HttpHosts::List(requested) => match requested.iter().find(|asked| asked.is(&entry.host)) {
-                                Some(asked) => asked.methods.as_ref().unwrap_or(default),
-                                None if user_hosts => default,
-                                None => return None,
+                        let (target, methods) = match requested {
+                            HttpHosts::All => (entry.target.clone(), default),
+                            HttpHosts::List(requested) => {
+                                match requested.iter().find(|asked| entry.target.is_within(&asked.target)) {
+                                    Some(asked) => (
+                                        entry.target.narrowing(&asked.target),
+                                        asked.methods.as_ref().unwrap_or(default),
+                                    ),
+                                    None if user_hosts => (entry.target.clone(), default),
+                                    None => return None,
+                                }
                             },
                         };
                         Some(EffectiveHost {
-                            host: entry.host.clone(),
+                            target,
                             methods: narrowed(methods, entry),
                         })
                     })
@@ -405,14 +413,15 @@ pub enum HttpHosts {
     List(Vec<HttpHostEntry>),
 }
 
-/// A host entry — `host`, `host:port` or `*.domain` — with its methods: as they are written
-/// ([`HttpHostEntry`]) or as they come into effect ([`EffectiveHost`]).
+/// An entry of the outgoing HTTP — a host or, for a backend, a network — with its methods: as they
+/// are written ([`HttpHostEntry`]) or as they come into effect ([`EffectiveHost`]).
 ///
-/// In TOML an entry without methods of its own is a string, `"api.example.org"`, and one with them a
-/// table, `{ host = "api.example.org", methods = ["get"] }`.
+/// In TOML a host without methods of its own is a string, `"api.example.org"`, and any other entry
+/// a table: `{ host = "api.example.org", methods = ["get"] }`,
+/// `{ network = "lan", ports = [80, 8080], methods = ["get"] }`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostEntry<M> {
-    pub host: String,
+    pub target: HostTarget,
     pub methods: M,
 }
 
@@ -423,10 +432,57 @@ pub type HttpHostEntry = HostEntry<Option<HttpMethods>>;
 /// An effective entry: its methods are those that come into effect.
 pub type EffectiveHost = HostEntry<HttpMethods>;
 
+/// What an entry lets through.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HostTarget {
+    /// `host`, `host:port` or `*.domain`.
+    Host(String),
+    /// The IP addresses of `network`, on `ports` or on any port; the backend only.
+    Network { network: Network, ports: Option<Vec<u16>> },
+}
+
+impl HostTarget {
+    /// Whether the entry of the user `self` is a choice of the entry of the manifest `asked`: the same
+    /// host, or a network and ports inside its own.
+    fn is_within(&self, asked: &Self) -> bool {
+        match (self, asked) {
+            (Self::Host(host), Self::Host(asked)) => host.eq_ignore_ascii_case(asked),
+            (
+                Self::Network { network, ports },
+                Self::Network {
+                    network: asked,
+                    ports: asked_ports,
+                },
+            ) => {
+                asked.contains(network)
+                    && match (ports, asked_ports) {
+                        (Some(ports), Some(asked_ports)) => ports.iter().all(|port| asked_ports.contains(port)),
+                        _ => true,
+                    }
+            },
+            _ => false,
+        }
+    }
+
+    /// The choice `self` of `asked`, with the ports of `asked` if it names none of its own.
+    fn narrowing(&self, asked: &Self) -> Self {
+        match (self, asked) {
+            (Self::Network { network, ports: None }, Self::Network { ports, .. }) => Self::Network {
+                network: *network,
+                ports: ports.clone(),
+            },
+            _ => self.clone(),
+        }
+    }
+}
+
 impl<M> HostEntry<M> {
-    /// Whether this is the entry of `host`, as it is written.
-    pub fn is(&self, host: &str) -> bool {
-        self.host.eq_ignore_ascii_case(host)
+    /// The host of a host entry.
+    pub fn host(&self) -> Option<&str> {
+        match &self.target {
+            HostTarget::Host(host) => Some(host),
+            HostTarget::Network { .. } => None,
+        }
     }
 }
 
@@ -438,11 +494,14 @@ impl From<&str> for HttpHostEntry {
 
 impl From<String> for HttpHostEntry {
     fn from(host: String) -> Self {
-        Self { host, methods: None }
+        Self {
+            target: HostTarget::Host(host),
+            methods: None,
+        }
     }
 }
 
-/// The methods of a [`HostEntry`]; unset ones are written as a bare host string.
+/// The methods of a [`HostEntry`]; unset ones of a host are written as a bare host string.
 pub trait EntryMethods: Default {
     fn is_unset(&self) -> bool;
 }
@@ -464,7 +523,12 @@ impl EntryMethods for HttpMethods {
 enum HostEntryRepr<M> {
     Host(String),
     Table {
-        host: String,
+        #[serde(default)]
+        host: Option<String>,
+        #[serde(default)]
+        network: Option<Network>,
+        #[serde(default)]
+        ports: Option<Vec<u16>>,
         #[serde(default)]
         methods: M,
     },
@@ -472,33 +536,64 @@ enum HostEntryRepr<M> {
 
 impl<'de, M: EntryMethods + Deserialize<'de>> Deserialize<'de> for HostEntry<M> {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Ok(match HostEntryRepr::<M>::deserialize(deserializer)? {
-            HostEntryRepr::Host(host) => Self {
+        use serde::de::Error;
+
+        let (target, methods) = match HostEntryRepr::<M>::deserialize(deserializer)? {
+            HostEntryRepr::Host(host) => (HostTarget::Host(host), M::default()),
+            HostEntryRepr::Table {
                 host,
-                methods: M::default(),
+                network,
+                ports,
+                methods,
+            } => match (host, network) {
+                (Some(_), _) if ports.is_some() => {
+                    return Err(D::Error::custom(
+                        "the ports of a host are in its `host`, not in `ports`",
+                    ));
+                },
+                (Some(host), None) => (HostTarget::Host(host), methods),
+                (None, Some(network)) => (HostTarget::Network { network, ports }, methods),
+                _ => return Err(D::Error::custom("an entry is either a `host` or a `network`")),
             },
-            HostEntryRepr::Table { host, methods } => Self { host, methods },
-        })
+        };
+        Ok(Self { target, methods })
     }
 }
 
 impl<M: EntryMethods + Serialize> Serialize for HostEntry<M> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        fn unset<M: EntryMethods>(methods: &&M) -> bool {
+            methods.is_unset()
+        }
+
         #[derive(Serialize)]
-        struct Table<'a, M> {
-            host: &'a str,
+        struct Table<'a, M: EntryMethods> {
+            #[serde(skip_serializing_if = "Option::is_none")]
+            host: Option<&'a str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            network: Option<&'a Network>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            ports: Option<&'a Vec<u16>>,
+            #[serde(skip_serializing_if = "unset")]
             methods: &'a M,
         }
 
-        if self.methods.is_unset() {
-            serializer.serialize_str(&self.host)
-        } else {
-            Table {
-                host: &self.host,
+        let table = match &self.target {
+            HostTarget::Host(host) if self.methods.is_unset() => return serializer.serialize_str(host),
+            HostTarget::Host(host) => Table {
+                host: Some(host),
+                network: None,
+                ports: None,
                 methods: &self.methods,
-            }
-            .serialize(serializer)
-        }
+            },
+            HostTarget::Network { network, ports } => Table {
+                host: None,
+                network: Some(network),
+                ports: ports.as_ref(),
+                methods: &self.methods,
+            },
+        };
+        table.serialize(serializer)
     }
 }
 
@@ -519,6 +614,10 @@ impl HttpHosts {
 
     fn has_methods(&self) -> bool {
         matches!(self, Self::List(hosts) if hosts.iter().any(|entry| entry.methods.is_some()))
+    }
+
+    fn has_networks(&self) -> bool {
+        matches!(self, Self::List(hosts) if hosts.iter().any(|entry| entry.host().is_none()))
     }
 }
 
@@ -604,8 +703,12 @@ pub struct LappSettings {
 impl LappSettings {
     /// What the format allows but the platform cannot do.
     pub fn validate(&self) -> Result<(), String> {
-        if self.network.http.front.hosts.has_methods() {
+        let front = &self.network.http.front.hosts;
+        if front.has_methods() {
             return Err("the front hosts cannot have methods: the CSP of the lapp window does not limit them".into());
+        }
+        if front.has_networks() {
+            return Err("the front hosts cannot be networks: the CSP of the lapp window cannot name them".into());
         }
         Ok(())
     }
@@ -950,7 +1053,7 @@ mod tests {
             entries
                 .iter()
                 .map(|(host, methods)| EffectiveHost {
-                    host: (*host).into(),
+                    target: HostTarget::Host((*host).into()),
                     methods: methods.clone(),
                 })
                 .collect(),
@@ -963,7 +1066,7 @@ mod tests {
 
     fn entry(host: &str, entry_methods: &[HttpMethod]) -> HttpHostEntry {
         HttpHostEntry {
-            host: host.into(),
+            target: HostTarget::Host(host.into()),
             methods: Some(methods(entry_methods)),
         }
     }
@@ -1006,13 +1109,122 @@ mod tests {
 
         let hosts = Hosts {
             hosts: vec![EffectiveHost {
-                host: "api.org".into(),
+                target: HostTarget::Host("api.org".into()),
                 methods: HttpMethods::All,
             }],
         };
         let written = toml::to_string(&hosts).unwrap();
         assert_eq!(written, "[[hosts]]\nhost = \"api.org\"\nmethods = \"all\"\n");
         assert_eq!(toml::from_str::<Hosts>(&written).unwrap().hosts, hosts.hosts);
+    }
+
+    fn net(network: &str, ports: Option<&[u16]>, entry_methods: Option<&[HttpMethod]>) -> HttpHostEntry {
+        HttpHostEntry {
+            target: HostTarget::Network {
+                network: network.parse().unwrap(),
+                ports: ports.map(<[u16]>::to_vec),
+            },
+            methods: entry_methods.map(methods),
+        }
+    }
+
+    fn effective_net(network: &str, ports: Option<&[u16]>, effective_methods: HttpMethods) -> EffectiveHost {
+        EffectiveHost {
+            target: HostTarget::Network {
+                network: network.parse().unwrap(),
+                ports: ports.map(<[u16]>::to_vec),
+            },
+            methods: effective_methods,
+        }
+    }
+
+    #[cfg(feature = "io")]
+    #[test]
+    fn network_entries_parse() {
+        #[derive(Deserialize, Serialize)]
+        struct Hosts {
+            hosts: HttpHosts,
+        }
+
+        let parsed: Hosts = toml::from_str(
+            r#"hosts = [{ network = "lan", ports = [80, 8080], methods = ["get"] }, { network = "fd00::/8" }, { network = "loopback" }]"#,
+        )
+        .unwrap();
+        assert_eq!(
+            parsed.hosts,
+            HttpHosts::List(vec![
+                net("lan", Some(&[80, 8080]), Some(&[HttpMethod::Get])),
+                net("fd00::/8", None, None),
+                net("loopback", None, None),
+            ])
+        );
+        let written = toml::to_string(&parsed).unwrap();
+        assert_eq!(toml::from_str::<Hosts>(&written).unwrap().hosts, parsed.hosts);
+
+        for invalid in [
+            r#"hosts = [{ network = "192.168.1.0/33" }]"#,
+            r#"hosts = [{ network = "lan", host = "a.org" }]"#,
+            r#"hosts = [{ host = "a.org", ports = [80] }]"#,
+            r#"hosts = [{ ports = [80] }]"#,
+        ] {
+            assert!(toml::from_str::<Hosts>(invalid).is_err(), "{invalid}");
+        }
+    }
+
+    #[test]
+    fn front_hosts_are_not_networks() {
+        let mut settings = LappSettings::default();
+        settings.network.http.front.hosts = HttpHosts::List(vec![net("lan", None, None)]);
+        assert!(settings.validate().unwrap_err().contains("networks"));
+
+        settings.network.http.front.hosts = HttpHosts::new();
+        settings.network.http.back.hosts = HttpHosts::List(vec![net("lan", None, None)]);
+        assert!(settings.validate().is_ok());
+    }
+
+    #[test]
+    fn user_networks_lie_inside_those_of_the_manifest() {
+        use HttpMethod::*;
+
+        let requested = HttpHosts::List(vec![net("lan", Some(&[80, 8080]), Some(&[Get, Post]))]);
+        let default = methods(&[Get]);
+        let resolve = |user_hosts, allowed: Vec<HttpHostEntry>| {
+            EffectiveHosts::resolve(&requested, user_hosts, &default, &HttpHosts::List(allowed))
+        };
+
+        // A subnet of the manifest network takes its ports and narrows its methods.
+        assert_eq!(
+            resolve(false, vec![net("192.168.1.0/24", None, Some(&[Get, Delete]))]),
+            EffectiveHosts::List(vec![effective_net(
+                "192.168.1.0/24",
+                Some(&[80, 8080]),
+                methods(&[Get])
+            )])
+        );
+        assert_eq!(
+            resolve(false, vec![net("192.168.1.0/24", Some(&[8080]), None)]),
+            EffectiveHosts::List(vec![effective_net(
+                "192.168.1.0/24",
+                Some(&[8080]),
+                methods(&[Get, Post])
+            )])
+        );
+
+        // Outside of the manifest network or its ports: only with `user_hosts`, with the default
+        // methods.
+        for outside in [net("127.0.0.0/8", None, None), net("10.0.0.0/8", Some(&[22]), None)] {
+            assert!(resolve(false, vec![outside.clone()]).is_empty(), "{outside:?}");
+            let EffectiveHosts::List(hosts) = resolve(true, vec![outside.clone()]) else {
+                panic!("not a list");
+            };
+            assert_eq!(hosts[0].methods, default, "{outside:?}");
+        }
+
+        // "all" of the user is the network of the manifest as it is.
+        assert_eq!(
+            EffectiveHosts::resolve(&requested, false, &default, &HttpHosts::All),
+            EffectiveHosts::List(vec![effective_net("lan", Some(&[80, 8080]), methods(&[Get, Post]))])
+        );
     }
 
     #[test]

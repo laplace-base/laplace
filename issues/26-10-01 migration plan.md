@@ -235,7 +235,8 @@ back с бесконечным циклом получает ошибку по �
 `effective_http_hosts().back`, методы и тайм-аут `required.network.http.back` (`HttpMethod` дополнен
 `head`/`put`/`delete`/`patch`/`options`), локальные адреса и plain `http` — только для хоста, указанного
 как есть. Ограничение: DNS rebinding между проверкой и запросом не ловится. Записи хостов со своими
-методами, сужение методов пользователем и `user_hosts` — `26-11-23`; подсети и loopback — `26-11-24`. Клиент SDK —
+методами, сужение методов пользователем и `user_hosts` — `26-11-23`; подсети, `lan` и `loopback` —
+запись `network` (`26-11-24`). Клиент SDK —
 `laplace_back_api::http_client` поверх `wasip2`.
 
 ## Этап 4. Push между front и back (замена WebSocket)
@@ -259,7 +260,8 @@ front → back — новая команда, вызывающая back под �
 `p2p` (`dial`, `add-address`, `publish`, `close`), экспорт `on-p2p-message`, ответы на операции — как
 `MessageIn::Response` в старом. Право `tcp` back-а; настройки — `required.network.gossipsub` в
 манифесте и при необходимости выбор пользователя в `allowed.network.gossipsub`; глобальный
-`p2p.mdns_discovery_enabled` в `Laplace.toml`.
+`p2p.mdns_discovery_enabled` в `Laplace.toml`. HTTP к устройствам сети уже даёт запись
+`network` (3.3); UDP/TCP для поиска устройств — здесь.
 
 5.2. Ключ пира хранить на хосте в каталоге данных лаппа, а не присылать с клиента (в старом
 keypair генерировался в браузере и передавался в `/api/p2p`).

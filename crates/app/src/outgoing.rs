@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use http::uri::{Authority, Scheme};
 use http_body_util::BodyExt;
-use laplace_settings::lapp::{EffectiveHosts, HttpMethods};
+use laplace_settings::lapp::{EffectiveHosts, HostTarget, HttpMethods};
 use wasmtime_wasi_http::{Error, RequestOptions, WasiBody, WasiHttpHooks, default_send_request};
 
 /// What the backend of a lapp may reach over HTTP.
@@ -33,13 +33,17 @@ enum HostMatch {
     All,
     /// Through `*.domain`, with the length of `domain`: a longer one is closer.
     Mask(usize),
+    /// An IP address through `network`, with the prefix length of its range: a longer one is closer.
+    Network(u8),
     /// Listed as it is.
     Exact,
 }
 
 impl HostMatch {
+    /// Whether the host is let through as one of many, without being named: a local address or
+    /// plain HTTP then needs a closer entry.
     fn is_broad(self) -> bool {
-        self != Self::Exact
+        matches!(self, Self::All | Self::Mask(_))
     }
 }
 
@@ -90,7 +94,21 @@ impl HttpAccess {
             EffectiveHosts::All(methods) => Some((HostMatch::All, methods)),
             EffectiveHosts::List(entries) => entries
                 .iter()
-                .filter_map(|entry| Some((entry_match(&entry.host, host, port, default_port)?, &entry.methods)))
+                .filter_map(|entry| {
+                    let matched = match &entry.target {
+                        HostTarget::Host(entry) => entry_match(entry, host, port, default_port)?,
+                        HostTarget::Network { network, ports } => {
+                            // A network matches an address as it is, never a name: a name may resolve
+                            // to another address when connecting.
+                            let ip = host.parse::<IpAddr>().ok()?;
+                            if ports.as_ref().is_some_and(|ports| !ports.contains(&port)) {
+                                return None;
+                            }
+                            HostMatch::Network(network.matches(ip)?)
+                        },
+                    };
+                    Some((matched, &entry.methods))
+                })
                 .max_by_key(|(matched, _)| *matched),
         }
     }
@@ -254,7 +272,7 @@ mod tests {
             hosts
                 .iter()
                 .map(|(host, methods)| EffectiveHost {
-                    host: (*host).into(),
+                    target: HostTarget::Host((*host).into()),
                     methods: methods.clone(),
                 })
                 .collect(),
@@ -303,6 +321,96 @@ mod tests {
         let access = access(list(&["*.local", "nas.local:8080"]));
         assert_eq!(check(&access, "GET", "http://nas.local:8080/"), Ok(false));
         assert!(check(&access, "GET", "http://printer.local/").is_err());
+    }
+
+    fn network(network: &str, ports: Option<&[u16]>) -> EffectiveHost {
+        EffectiveHost {
+            target: HostTarget::Network {
+                network: network.parse().unwrap(),
+                ports: ports.map(<[u16]>::to_vec),
+            },
+            methods: HttpMethods::All,
+        }
+    }
+
+    fn entries(entries: Vec<EffectiveHost>) -> HttpAccess {
+        access(EffectiveHosts::List(entries))
+    }
+
+    #[test]
+    fn network_lets_its_addresses_through() {
+        let access = entries(vec![network("192.168.1.0/24", Some(&[80, 8080]))]);
+
+        assert_eq!(check(&access, "GET", "http://192.168.1.20/"), Ok(false));
+        assert_eq!(check(&access, "GET", "https://192.168.1.20:8080/"), Ok(false));
+        for denied in [
+            "http://192.168.1.20:22/",
+            "https://192.168.1.20/",
+            "http://192.168.2.1/",
+            "http://10.0.0.1/",
+        ] {
+            assert!(check(&access, "GET", denied).is_err(), "{denied}");
+        }
+    }
+
+    #[test]
+    fn network_never_matches_a_name() {
+        let access = entries(vec![network("lan", None), network("loopback", None)]);
+        for name in ["http://nas.local/", "http://localhost/", "https://router.lan/"] {
+            assert!(check(&access, "GET", name).is_err(), "{name}");
+        }
+    }
+
+    #[test]
+    fn lan_is_not_loopback() {
+        let lan = entries(vec![network("lan", None)]);
+        assert_eq!(check(&lan, "GET", "http://10.1.2.3:8080/"), Ok(false));
+        assert_eq!(check(&lan, "GET", "http://100.101.1.1/"), Ok(false));
+        assert_eq!(check(&lan, "GET", "http://[fd00::5]/"), Ok(false));
+        assert!(check(&lan, "GET", "http://127.0.0.1/").is_err());
+        assert!(check(&lan, "GET", "http://[::1]/").is_err());
+
+        let loopback = entries(vec![network("loopback", None)]);
+        assert_eq!(check(&loopback, "GET", "http://127.0.0.1:3000/"), Ok(false));
+        assert_eq!(check(&loopback, "GET", "http://[::1]:3000/"), Ok(false));
+        assert!(check(&loopback, "GET", "http://192.168.1.1/").is_err());
+    }
+
+    #[test]
+    fn closest_of_hosts_and_networks_decides() {
+        let only = |methods: &[laplace_settings::lapp::HttpMethod]| HttpMethods::List(methods.to_vec());
+        let access = entries(vec![
+            EffectiveHost {
+                methods: only(&[Get]),
+                ..network("lan", None)
+            },
+            EffectiveHost {
+                methods: only(&[Post]),
+                ..network("192.168.1.0/24", None)
+            },
+            EffectiveHost {
+                target: HostTarget::Host("192.168.1.5".into()),
+                methods: only(&[Delete]),
+            },
+        ]);
+
+        assert!(check(&access, "GET", "http://10.0.0.1/").is_ok());
+        assert!(check(&access, "POST", "http://10.0.0.1/").is_err());
+        assert!(check(&access, "POST", "http://192.168.1.20/").is_ok());
+        assert!(check(&access, "GET", "http://192.168.1.20/").is_err());
+        assert!(check(&access, "DELETE", "http://192.168.1.5/").is_ok());
+        assert!(check(&access, "POST", "http://192.168.1.5/").is_err());
+    }
+
+    #[test]
+    fn without_a_network_local_addresses_stay_closed() {
+        let access = entries(vec![network("192.168.1.0/24", None), EffectiveHost {
+            target: HostTarget::Host("*.example.org".into()),
+            methods: HttpMethods::All,
+        }]);
+        assert!(check(&access, "GET", "https://10.0.0.1/").is_err());
+        assert!(check(&access, "GET", "http://a.example.org/").is_err());
+        assert_eq!(check(&access, "GET", "https://a.example.org/"), Ok(true));
     }
 
     #[test]

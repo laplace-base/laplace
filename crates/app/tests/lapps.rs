@@ -959,3 +959,32 @@ fn outgoing_http_methods_narrowed_by_the_user() {
     let answer = fetch(&state, &format!("{url}&method=POST"));
     assert!(answer.starts_with("denied"), "{answer}");
 }
+
+#[test]
+fn outgoing_http_to_a_network() {
+    let port = http_server(true);
+    let url = format!("url=http://127.0.0.1:{port}/");
+
+    let loopback = format!("[{{ network = \"loopback\", ports = [{port}] }}]");
+    let (_fixture, state) = http_fixture("http-net-loopback", &loopback, "\"all\"", true);
+    assert_eq!(fetch(&state, &url), "200 hello");
+
+    let lan = "[{ network = \"lan\" }]";
+    let (_fixture, state) = http_fixture("http-net-lan", lan, "\"all\"", true);
+    let answer = fetch(&state, &url);
+    assert!(answer.starts_with("denied"), "{answer}");
+}
+
+#[test]
+fn outgoing_http_user_network_stays_inside_the_manifest_one() {
+    let port = http_server(true);
+    let url = format!("url=http://127.0.0.1:{port}/");
+    let user = "[{ network = \"127.0.0.0/8\" }]";
+
+    let (_fixture, state) = http_fixture("http-net-outside", "[{ network = \"lan\" }]", user, true);
+    let answer = fetch(&state, &url);
+    assert!(answer.starts_with("denied"), "{answer}");
+
+    let (_fixture, state) = http_fixture("http-net-inside", "[{ network = \"loopback\" }]", user, true);
+    assert_eq!(fetch(&state, &url), "200 hello");
+}
